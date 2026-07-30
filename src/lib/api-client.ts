@@ -5,6 +5,7 @@
 // exactly like they did against the old fetch()-based client.
 
 import type { AttachedFile, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
+import { getModelProvider } from './types';
 import * as store from './store';
 import type { MeetingSummary } from './store';
 import { runMeeting as engineRunMeeting } from './engine/runner';
@@ -337,6 +338,32 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
   }
   if (meeting.participantIds.length < 2) {
     handlers.onError?.('נדרשים לפחות שני משתתפים כדי להריץ את הפגישה.');
+    return;
+  }
+
+  // The facilitator always has a usable model (pickFacilitatorModel falls
+  // back to whichever key exists), but a persona's model is whatever was
+  // configured for it — a user who only entered a Gemini key and never
+  // touched personas defaulting to Claude would otherwise only find out
+  // when every one of that persona's calls fails mid-run. Check before
+  // burning a single call.
+  const allPersonas = await store.listPersonas();
+  const personaById = new Map(allPersonas.map((p) => [p.id, p]));
+  const participants = meeting.participantIds
+    .map((pid) => personaById.get(pid))
+    .filter((p): p is (typeof allPersonas)[number] => p != null);
+
+  const hasKeyFor = (model: string): boolean =>
+    getModelProvider(model) === 'gemini' ? !!geminiKey : !!anthropicKey;
+
+  const blockedParticipants = participants.filter((p) => !hasKeyFor(p.model)).map((p) => p.name);
+
+  if (blockedParticipants.length > 0) {
+    handlers.onError?.(
+      `לא ניתן להתחיל את הפגישה: למשתתפים הבאים דרוש מפתח API שלא הוגדר — ${blockedParticipants.join(
+        ', '
+      )}. יש להזין את המפתח החסר במסך ההגדרות (Settings), או להחליף את המודל של המשתתפים האלו למודל שתואם למפתח הקיים.`
+    );
     return;
   }
 
