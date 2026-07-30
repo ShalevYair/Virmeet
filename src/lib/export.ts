@@ -5,7 +5,7 @@
 // mechanism (Blob + object URL, since there's no server route to stream
 // from) is new.
 
-import { Meeting, MeetingTask, TranscriptEntry } from './types';
+import { Meeting, MeetingTask, Persona, TranscriptEntry } from './types';
 
 export const DISCLAIMER_HE =
   'הפלט הזה הוא הכנה לפגישה, לא תחליף לה. הדעות כאן נוצרו על ידי מודל שפה ואינן מייצגות את עמדתם של אנשים אמיתיים.';
@@ -135,6 +135,17 @@ export function downloadMeetingMarkdown(meeting: Meeting): void {
   downloadBlob(renderMarkdown(meeting), `virmeet-meeting-${meeting.id}.md`, 'text/markdown;charset=utf-8');
 }
 
-export function downloadMeetingJson(meeting: Meeting): void {
-  downloadBlob(JSON.stringify(meeting, null, 2), `virmeet-meeting-${meeting.id}.json`, 'application/json;charset=utf-8');
+/**
+ * `participants` is a name/role-only snapshot of the meeting's personas — not
+ * the full `Persona` record (no `prompt`, no `files`). It exists so
+ * `scripts/eval-attribution.ts` (docs/PLAN-correctness-and-evaluation.md §6)
+ * can run the speaker-attribution eval against an exported meeting without
+ * a second export step; nothing else reads it.
+ */
+export function downloadMeetingJson(meeting: Meeting, participants: Persona[]): void {
+  const payload = {
+    meeting,
+    participants: participants.map((p) => ({ id: p.id, name: p.name, role: p.role })),
+  };
+  downloadBlob(JSON.stringify(payload, null, 2), `virmeet-meeting-${meeting.id}.json`, 'application/json;charset=utf-8');
 }
