@@ -117,6 +117,29 @@ function usageFrom(usage: Anthropic.Usage): CallModelUsage {
   };
 }
 
+export type TestApiKeyResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * Validates an Anthropic API key with the cheapest possible real request —
+ * listing models, which needs authentication but performs no generation and
+ * costs no tokens. Never throws.
+ */
+export async function testApiKey(apiKey: string): Promise<TestApiKeyResult> {
+  try {
+    const client = getClient(apiKey);
+    await client.models.list({ limit: 1 });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof Anthropic.AuthenticationError) {
+      return { ok: false, message: 'המפתח אינו תקין — Anthropic דחה את בקשת האימות.' };
+    }
+    return {
+      ok: false,
+      message: `הבדיקה נכשלה: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 /**
  * Single logical model call with retry (3 attempts, backoff 2s/4s/8s), retrying
  * only on RateLimitError / InternalServerError / connection errors. Streams

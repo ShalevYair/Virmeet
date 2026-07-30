@@ -13,7 +13,7 @@ import {
   Persona,
   TranscriptEntry,
 } from '../types';
-import { getModelProvider, MODELS } from '../types';
+import { getModelProvider, pickFacilitatorModel } from '../types';
 import { callModel as realCallModel } from '../llm';
 import { CallModelResult } from '../llm-types';
 import {
@@ -96,6 +96,10 @@ export async function runMeeting(
   function apiKeyFor(model: string): string | undefined {
     return getModelProvider(model) === 'gemini' ? apiKeys.gemini : apiKeys.anthropic;
   }
+
+  // The facilitator doesn't have to run on Anthropic — a meeting where every
+  // key is Gemini-only should still complete end to end (see pickFacilitatorModel).
+  const facilitatorModel = pickFacilitatorModel(apiKeys);
 
   const meeting = await deps.getMeeting(meetingId);
   if (!meeting) {
@@ -239,7 +243,7 @@ export async function runMeeting(
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: MODELS.facilitator,
+        model: facilitatorModel,
         system: prompts.buildFacilitatorSystemBlocks(org),
         messages: [
           {
@@ -250,7 +254,7 @@ export async function runMeeting(
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
-        apiKey: apiKeyFor(MODELS.facilitator),
+        apiKey: apiKeyFor(facilitatorModel),
       });
       recordTokens(result.usage);
 
@@ -370,14 +374,14 @@ export async function runMeeting(
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: MODELS.facilitator,
+        model: facilitatorModel,
         system: prompts.buildFacilitatorSystemBlocks(org),
         messages: [
           { role: 'user', content: prompts.buildConvergenceUserMessage(meeting, meetingTypes, transcript) },
         ],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
-        apiKey: apiKeyFor(MODELS.facilitator),
+        apiKey: apiKeyFor(facilitatorModel),
       });
       recordTokens(result.usage);
 
@@ -410,7 +414,7 @@ export async function runMeeting(
   try {
     recordApiCall();
     const result = await deps.callModel({
-      model: MODELS.facilitator,
+      model: facilitatorModel,
       system: prompts.buildFacilitatorSystemBlocks(org),
       messages: [
         {
@@ -421,7 +425,7 @@ export async function runMeeting(
       maxTokens: REGULAR_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
-      apiKey: apiKeyFor(MODELS.facilitator),
+      apiKey: apiKeyFor(facilitatorModel),
     });
     recordTokens(result.usage);
 
