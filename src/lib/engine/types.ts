@@ -2,10 +2,10 @@
 // These types describe the runner's public event contract and the pieces it
 // depends on. Kept separate from src/lib/types.ts (the persisted data model).
 
-import { Meeting, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
+import { Meeting, MeetingPhase, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { CallModelOptions, CallModelResult } from '../anthropic';
 
-export type PhaseName = 'prep' | 'opening' | 'discussion' | 'convergence' | 'extraction';
+export type PhaseName = MeetingPhase;
 
 /** Events streamed out of runMeeting() — mirrors the SSE payloads verbatim (spec §4, §5). */
 export type MeetingEvent =
