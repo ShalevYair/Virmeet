@@ -521,7 +521,15 @@ function MeetingRunInner({ id }: { id: string }) {
               <Button variant="secondary" onClick={() => downloadMeetingMarkdown(meeting)}>
                 ייצוא Markdown
               </Button>
-              <Button variant="secondary" onClick={() => downloadMeetingJson(meeting)}>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  downloadMeetingJson(
+                    meeting,
+                    meeting.participantIds.map((id) => personaById.get(id)).filter((p): p is Persona => p != null)
+                  )
+                }
+              >
                 ייצוא JSON
               </Button>
             </>
