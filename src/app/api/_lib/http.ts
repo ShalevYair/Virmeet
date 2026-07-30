@@ -58,11 +58,17 @@ export function internalError(err: unknown): NextResponse {
   return jsonError(message, 500);
 }
 
-/** 500 with a clear Hebrew message when ANTHROPIC_API_KEY is missing (spec §5). */
-export function requireApiKey(): NextResponse | null {
-  if (!process.env.ANTHROPIC_API_KEY) {
+/**
+ * 500 with a clear Hebrew message when no Anthropic key is available at all —
+ * neither ANTHROPIC_API_KEY on the server nor a client-supplied key (spec §5).
+ * `clientKey` is the x-anthropic-api-key header the browser may have sent;
+ * pass it through here rather than reading process.env directly so a
+ * personal browser key can stand in for a missing server-wide one.
+ */
+export function requireApiKey(clientKey?: string | null): NextResponse | null {
+  if (!clientKey && !process.env.ANTHROPIC_API_KEY) {
     return jsonError(
-      'מפתח ה-API של Anthropic (ANTHROPIC_API_KEY) לא הוגדר בשרת. יש להגדיר אותו בקובץ .env.local כדי להריץ פגישות.',
+      'מפתח ה-API של Anthropic לא הוגדר. אפשר להגדיר ANTHROPIC_API_KEY בקובץ .env.local בצד השרת, או להזין מפתח אישי במסך ההגדרות (Settings) בדפדפן.',
       500
     );
   }

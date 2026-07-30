@@ -77,11 +77,17 @@ function makeEntry(
  * `overrideDeps` exists purely for tests: production callers should invoke
  * `runMeeting(meetingId, onEvent)` and let it use the real store + Anthropic
  * client.
+ *
+ * `apiKey` — when the run route received one from the browser's
+ * x-anthropic-api-key header — is forwarded to every model call below and
+ * nowhere else: it is never added to `meeting`, `transcript`, or any
+ * persisted patch, so it can't reach data/ or the exported transcript.
  */
 export async function runMeeting(
   meetingId: string,
   onEvent: OnEvent,
-  overrideDeps: Partial<RunMeetingDeps> = {}
+  overrideDeps: Partial<RunMeetingDeps> = {},
+  apiKey?: string
 ): Promise<void> {
   const deps: RunMeetingDeps = { ...defaultDeps, ...overrideDeps };
 
@@ -166,6 +172,7 @@ export async function runMeeting(
           effort: 'medium',
           jsonSchema: PREP_SCHEMA,
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
+          apiKey,
         });
         return result;
       } finally {
@@ -237,6 +244,7 @@ export async function runMeeting(
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
+        apiKey,
       });
       recordTokens(result.usage);
 
@@ -317,6 +325,7 @@ export async function runMeeting(
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
+          apiKey,
         });
         budget.record(persona.id);
         recordTokens(result.usage);
@@ -362,6 +371,7 @@ export async function runMeeting(
         ],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
+        apiKey,
       });
       recordTokens(result.usage);
 
@@ -405,6 +415,7 @@ export async function runMeeting(
       maxTokens: REGULAR_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
+      apiKey,
     });
     recordTokens(result.usage);
 

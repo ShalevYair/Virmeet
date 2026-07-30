@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ApiError, orgApi } from '@/lib/api-client';
 import type { OrgSettings } from '@/lib/types';
 import { Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
+import { ApiKeySettings } from '@/components/ApiKeySettings';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<OrgSettings | null>(null);
@@ -56,6 +57,8 @@ export default function SettingsPage() {
       </div>
 
       {error && <ErrorBanner message={error} onRetry={load} />}
+
+      <ApiKeySettings />
 
       {!settings ? (
         <div className="flex flex-col gap-4">

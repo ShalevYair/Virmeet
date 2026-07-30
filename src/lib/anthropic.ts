@@ -5,16 +5,26 @@ import Anthropic from '@anthropic-ai/sdk';
 
 let client: Anthropic | null = null;
 
-/** Lazily constructs the Anthropic client. Throws a Hebrew error if the API key is unset. */
-export function getClient(): Anthropic {
+/**
+ * Lazily constructs the Anthropic client. `explicitApiKey` — when present —
+ * is a key the browser sent on this request (see the run route) and takes
+ * priority over ANTHROPIC_API_KEY. It is never cached or logged: a fresh,
+ * one-off client is built for it on every call so a user-supplied key never
+ * lingers in the shared module-level singleton or leaks across requests.
+ * Throws a Hebrew error if neither source has a key.
+ */
+export function getClient(explicitApiKey?: string): Anthropic {
+  if (explicitApiKey) {
+    // We own retries ourselves (see callModel) — disable the SDK's built-in
+    // retry so backoff timing stays deterministic and under our control.
+    return new Anthropic({ apiKey: explicitApiKey, maxRetries: 0 });
+  }
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error(
-      'מפתח ה-API של Anthropic (ANTHROPIC_API_KEY) לא הוגדר. יש להגדיר אותו בקובץ .env.local כדי להריץ פגישות.'
+      'מפתח ה-API של Anthropic לא הוגדר. אפשר להגדיר אותו בקובץ .env.local בצד השרת, או להזין מפתח אישי במסך ההגדרות (Settings) בדפדפן.'
     );
   }
   if (!client) {
-    // We own retries ourselves (see callModel) — disable the SDK's built-in
-    // retry so backoff timing stays deterministic and under our control.
     client = new Anthropic({ maxRetries: 0 });
   }
   return client;
@@ -40,6 +50,8 @@ export interface CallModelOptions {
   webSearch?: WebSearchOptions;
   /** JSON schema for structured output. Must set additionalProperties:false and required on every field. */
   jsonSchema?: Record<string, unknown>;
+  /** Optional key sent by the browser for this run, preferred over ANTHROPIC_API_KEY. Never logged or persisted. */
+  apiKey?: string;
 }
 
 export interface CallModelUsage {
@@ -158,7 +170,7 @@ function usageFrom(usage: Anthropic.Usage): CallModelUsage {
  * automatically when max_tokens exceeds the safe non-streaming threshold.
  */
 export async function callModel(opts: CallModelOptions): Promise<CallModelResult> {
-  const anthropic = getClient();
+  const anthropic = getClient(opts.apiKey);
   const params = buildParams(opts);
   const useStreaming = opts.maxTokens > STREAMING_THRESHOLD;
 
