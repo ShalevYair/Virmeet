@@ -1,12 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, healthApi, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
-import type { MeetingType, Persona } from '@/lib/types';
+import { ApiError, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
+import { getModelProvider, type MeetingType, type ModelProvider, type Persona } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 import { getStoredApiKey } from '@/lib/api-key';
+
+const PROVIDER_LABELS: Record<ModelProvider, string> = { anthropic: 'Anthropic', gemini: 'Gemini' };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} בייט`;
@@ -33,8 +36,10 @@ export default function NewMeetingPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
 
-  const [hasBrowserKey, setHasBrowserKey] = useState(true);
-  const [serverKeyConfigured, setServerKeyConfigured] = useState(true);
+  const [browserKeys, setBrowserKeys] = useState<Record<ModelProvider, boolean>>({
+    anthropic: true,
+    gemini: true,
+  });
 
   function load() {
     setLoadError(null);
@@ -49,16 +54,25 @@ export default function NewMeetingPage() {
   useEffect(load, []);
 
   useEffect(() => {
-    setHasBrowserKey(Boolean(getStoredApiKey()));
-    healthApi
-      .get()
-      .then((res) => setServerKeyConfigured(res.serverKeyConfigured))
-      .catch(() => setServerKeyConfigured(true)); // fail open — don't nag if the health check itself fails
+    setBrowserKeys({
+      anthropic: Boolean(getStoredApiKey('anthropic')),
+      gemini: Boolean(getStoredApiKey('gemini')),
+    });
   }, []);
 
-  const missingApiKey = !serverKeyConfigured && !hasBrowserKey;
-
   const activePersonas = useMemo(() => (personas ?? []).filter((p) => p.isActive), [personas]);
+
+  // The facilitator always runs on Anthropic; add each selected participant's
+  // provider so the banner below only warns about providers this meeting
+  // actually needs. There's no server key anymore — only what's in this
+  // browser's localStorage (see api-key.ts).
+  const missingProviders = useMemo(() => {
+    const needed = new Set<ModelProvider>(['anthropic']);
+    for (const p of activePersonas) {
+      if (participantIds.includes(p.id)) needed.add(getModelProvider(p.model));
+    }
+    return [...needed].filter((provider) => !browserKeys[provider]);
+  }, [activePersonas, participantIds, browserKeys]);
 
   function toggleType(id: string) {
     setSelectedTypeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -98,7 +112,7 @@ export default function NewMeetingPage() {
       for (const file of stagedFiles) {
         await meetingsApi.uploadFile(meeting.id, file);
       }
-      router.push(`/meetings/${meeting.id}`);
+      router.push(`/meetings/view/?id=${meeting.id}`);
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'יצירת הפגישה נכשלה');
       setSubmitting(false);
@@ -196,9 +210,9 @@ export default function NewMeetingPage() {
         {activePersonas.length === 0 ? (
           <p className="text-sm text-black/55 dark:text-white/55">
             אין משתתפים פעילים. הוסיפו משתתפים בעמוד{' '}
-            <a href="/personas" className="text-blue-600 hover:underline dark:text-blue-400">
+            <Link href="/personas/" className="text-blue-600 hover:underline dark:text-blue-400">
               משתתפים
-            </a>
+            </Link>
             .
           </p>
         ) : (
@@ -312,18 +326,20 @@ export default function NewMeetingPage() {
         </div>
       </Card>
 
-      {missingApiKey && (
+      {missingProviders.length > 0 && (
         <ErrorBanner
-          message={
-            'לא נמצא מפתח API של Anthropic — לא בשרת ולא בדפדפן הזה. הריצה תיכשל. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה.'
-          }
+          message={`לא נמצא מפתח API של ${missingProviders
+            .map((p) => PROVIDER_LABELS[p])
+            .join(' וגם ')} — לא בשרת ולא בדפדפן הזה. הריצה תיכשל עבור המשתתפים שמשתמשים במודל של ${
+            missingProviders.length > 1 ? 'הספקים האלה' : 'ספק זה'
+          }. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה.`}
         />
       )}
-      {missingApiKey && (
+      {missingProviders.length > 0 && (
         <p className="-mt-4 text-sm">
-          <a href="/settings" className="text-blue-600 hover:underline dark:text-blue-400">
+          <Link href="/settings/" className="text-blue-600 hover:underline dark:text-blue-400">
             מעבר להגדרות כדי להזין מפתח API
-          </a>
+          </Link>
         </p>
       )}
 

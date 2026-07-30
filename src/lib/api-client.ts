@@ -1,18 +1,15 @@
-// Virmeet — typed fetch helpers for the browser side (spec §5).
-// Every API route returns `{ error: 'הודעה בעברית' }` on failure; this module
-// normalizes that into a thrown ApiError so callers can surface it inline.
+// Virmeet — facade over store.ts (spec §5, §5.1 of docs/PLAN-static-github-pages.md).
+// There is no server anymore: every "API" call here talks straight to
+// IndexedDB via store.ts. This module exists so the page components barely
+// changed — they still call e.g. `personasApi.get(id)` and catch `ApiError`
+// exactly like they did against the old fetch()-based client.
 
-import type {
-  AttachedFile,
-  Meeting,
-  MeetingPhase,
-  MeetingResult,
-  MeetingType,
-  OrgSettings,
-  Persona,
-  TranscriptEntry,
-} from './types';
+import type { AttachedFile, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
+import * as store from './store';
+import type { MeetingSummary } from './store';
+import { runMeeting as engineRunMeeting } from './engine/runner';
 import { getStoredApiKey } from './api-key';
+import { ensureSeedLoaded } from './seed-loader';
 
 export class ApiError extends Error {
   status: number;
@@ -23,60 +20,44 @@ export class ApiError extends Error {
   }
 }
 
-export type MeetingSummary = Omit<Meeting, 'transcript' | 'result'>;
+export type { MeetingSummary };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
+function notFound(message: string): never {
+  throw new ApiError(message, 404);
+}
+
+function badRequest(message: string): never {
+  throw new ApiError(message, 400);
+}
+
+/**
+ * Runs `fn` against the store, first waiting for the seed-loader's one-time
+ * IndexedDB population to finish (see seed-loader.ts) so a page's very first
+ * read can never race ahead of seeding and render an empty list that never
+ * refreshes. Converts any thrown Error into an ApiError so existing
+ * `err instanceof ApiError` UI code keeps working.
+ */
+async function run<T>(fn: () => Promise<T>): Promise<T> {
   try {
-    res = await fetch(path, {
-      ...init,
-      headers: {
-        ...(init?.body && !(init.body instanceof FormData)
-          ? { 'Content-Type': 'application/json' }
-          : {}),
-        ...init?.headers,
-      },
-    });
-  } catch {
-    throw new ApiError('לא ניתן להתחבר לשרת. בדקו את החיבור ונסו שוב.', 0);
+    await ensureSeedLoaded();
+    return await fn();
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(err instanceof Error ? err.message : 'שגיאה לא צפויה.', 400);
   }
-
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  const text = await res.text();
-  let data: unknown = undefined;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      // Non-JSON body (shouldn't happen per spec, but don't crash on it).
-    }
-  }
-
-  if (!res.ok) {
-    const message =
-      data && typeof data === 'object' && 'error' in (data as Record<string, unknown>)
-        ? String((data as { error: unknown }).error)
-        : `שגיאה לא צפויה (${res.status})`;
-    throw new ApiError(message, res.status);
-  }
-
-  return data as T;
 }
 
-function json(body: unknown): string {
-  return JSON.stringify(body);
+function requireNonEmpty(value: string, fieldHebrew: string): void {
+  if (!value || value.trim().length === 0) {
+    badRequest(`השדה "${fieldHebrew}" הוא שדה חובה.`);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Health
-// ---------------------------------------------------------------------------
-
-export const healthApi = {
-  get: () => request<{ serverKeyConfigured: boolean }>('/api/health'),
-};
+function requireIntInRange(value: number, min: number, max: number, fieldHebrew: string): void {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    badRequest(`השדה "${fieldHebrew}" חייב להיות מספר שלם בין ${min} ל-${max}.`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Personas
@@ -95,24 +76,60 @@ export type PersonaInput = {
   isActive?: boolean;
 };
 
+/** Range/type checks that must hold no matter what — safe to apply on creation, when text fields are still blank scaffolding. */
+function validatePersonaRanges(input: Partial<PersonaInput>): void {
+  if (input.maxApiCalls !== undefined) requireIntInRange(input.maxApiCalls, 1, 20, 'מקסימום קריאות API');
+  if (input.maxWebSearches !== undefined) requireIntInRange(input.maxWebSearches, 0, 10, 'מקסימום חיפושי רשת');
+}
+
+/** Full validation, including non-empty text fields — for saving an actually-filled-in persona. */
+function validatePersonaInput(input: Partial<PersonaInput>): void {
+  if (input.name !== undefined) requireNonEmpty(input.name, 'שם');
+  if (input.role !== undefined) requireNonEmpty(input.role, 'תפקיד');
+  if (input.organization !== undefined) requireNonEmpty(input.organization, 'ארגון');
+  if (input.color !== undefined) requireNonEmpty(input.color, 'צבע');
+  if (input.prompt !== undefined) requireNonEmpty(input.prompt, 'פרומפט');
+  if (input.model !== undefined) requireNonEmpty(input.model, 'מודל');
+  validatePersonaRanges(input);
+}
+
 export const personasApi = {
-  list: () => request<Persona[]>('/api/personas'),
-  get: (id: string) => request<Persona>(`/api/personas/${id}`),
+  list: () => run(() => store.listPersonas()),
+  get: (id: string) =>
+    run(async () => (await store.getPersona(id)) ?? notFound('המשתתף לא נמצא.')),
+  // Intentionally lighter validation than update(): "+ הוסף משתתף" creates a
+  // blank scaffold (empty role/organization/prompt) and immediately navigates
+  // to the edit page for the user to fill in — only the numeric fields (which
+  // always have real default values) need checking here.
   create: (input: PersonaInput) =>
-    request<Persona>('/api/personas', { method: 'POST', body: json(input) }),
+    run(async () => {
+      validatePersonaRanges(input);
+      return store.createPersona(input);
+    }),
   update: (id: string, patch: Partial<PersonaInput>) =>
-    request<Persona>(`/api/personas/${id}`, { method: 'PATCH', body: json(patch) }),
-  remove: (id: string) => request<void>(`/api/personas/${id}`, { method: 'DELETE' }),
-  uploadFile: (id: string, file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    return request<AttachedFile | Persona>(`/api/personas/${id}/files`, {
-      method: 'POST',
-      body: form,
-    });
-  },
+    run(async () => {
+      validatePersonaInput(patch);
+      return (await store.updatePersona(id, patch)) ?? notFound('המשתתף לא נמצא.');
+    }),
+  remove: (id: string) =>
+    run(async () => {
+      if (!(await store.deletePersona(id))) notFound('המשתתף לא נמצא.');
+    }),
+  uploadFile: (id: string, file: File) =>
+    run(async () => {
+      const persona = await store.getPersona(id);
+      if (!persona) notFound('המשתתף לא נמצא.');
+      const attached = await store.saveUpload(file);
+      const updated = await store.setPersonaFiles(id, [...persona.files, attached]);
+      return updated ?? notFound('המשתתף לא נמצא.');
+    }),
   deleteFile: (id: string, fileId: string) =>
-    request<void>(`/api/personas/${id}/files/${fileId}`, { method: 'DELETE' }),
+    run(async () => {
+      const persona = await store.getPersona(id);
+      if (!persona) notFound('המשתתף לא נמצא.');
+      const nextFiles = persona.files.filter((f) => f.id !== fileId);
+      await store.setPersonaFiles(id, nextFiles);
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -125,14 +142,30 @@ export type MeetingTypeInput = {
   prompt: string;
 };
 
+function validateMeetingTypeInput(input: Partial<MeetingTypeInput>): void {
+  if (input.title !== undefined) requireNonEmpty(input.title, 'כותרת');
+  if (input.shortDescription !== undefined) requireNonEmpty(input.shortDescription, 'הסבר קצר');
+  if (input.prompt !== undefined) requireNonEmpty(input.prompt, 'פרומפט');
+}
+
 export const meetingTypesApi = {
-  list: () => request<MeetingType[]>('/api/meeting-types'),
-  get: (id: string) => request<MeetingType>(`/api/meeting-types/${id}`),
+  list: () => run(() => store.listMeetingTypes()),
+  get: (id: string) =>
+    run(async () => (await store.getMeetingType(id)) ?? notFound('סוג הפגישה לא נמצא.')),
   create: (input: MeetingTypeInput) =>
-    request<MeetingType>('/api/meeting-types', { method: 'POST', body: json(input) }),
+    run(async () => {
+      validateMeetingTypeInput(input);
+      return store.createMeetingType(input);
+    }),
   update: (id: string, patch: Partial<MeetingTypeInput>) =>
-    request<MeetingType>(`/api/meeting-types/${id}`, { method: 'PATCH', body: json(patch) }),
-  remove: (id: string) => request<void>(`/api/meeting-types/${id}`, { method: 'DELETE' }),
+    run(async () => {
+      validateMeetingTypeInput(patch);
+      return (await store.updateMeetingType(id, patch)) ?? notFound('סוג הפגישה לא נמצא.');
+    }),
+  remove: (id: string) =>
+    run(async () => {
+      if (!(await store.deleteMeetingType(id))) notFound('סוג הפגישה לא נמצא.');
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -142,9 +175,14 @@ export const meetingTypesApi = {
 export type OrgSettingsInput = Partial<Omit<OrgSettings, 'updatedAt'>>;
 
 export const orgApi = {
-  get: () => request<OrgSettings>('/api/org'),
+  get: () => run(() => store.getOrgSettings()),
   update: (patch: OrgSettingsInput) =>
-    request<OrgSettings>('/api/org', { method: 'PATCH', body: json(patch) }),
+    run(async () => {
+      if (patch.organizationName !== undefined) requireNonEmpty(patch.organizationName, 'שם הארגון');
+      if (patch.description !== undefined) requireNonEmpty(patch.description, 'תיאור ארגוני');
+      if (patch.constraints !== undefined) requireNonEmpty(patch.constraints, 'אילוצים');
+      return store.updateOrgSettings(patch);
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -159,31 +197,92 @@ export type MeetingCreateInput = {
   discussionRounds?: number;
 };
 
+export type MeetingUpdateInput = Partial<{
+  title: string;
+  objective: string;
+  meetingTypeIds: string[];
+  participantIds: string[];
+  discussionRounds: number;
+  status: 'draft' | 'cancelled';
+}>;
+
+async function assertParticipantsAndTypesExist(participantIds: string[], meetingTypeIds: string[]): Promise<void> {
+  const [personas, meetingTypes] = await Promise.all([store.listPersonas(), store.listMeetingTypes()]);
+  const personaIds = new Set(personas.map((p) => p.id));
+  const meetingTypeIdSet = new Set(meetingTypes.map((t) => t.id));
+
+  const unknownParticipant = participantIds.find((id) => !personaIds.has(id));
+  if (unknownParticipant) badRequest(`המשתתף שנבחר (${unknownParticipant}) אינו קיים.`);
+  const unknownType = meetingTypeIds.find((id) => !meetingTypeIdSet.has(id));
+  if (unknownType) badRequest(`סוג הפגישה שנבחר (${unknownType}) אינו קיים.`);
+}
+
 export const meetingsApi = {
-  list: () => request<MeetingSummary[]>('/api/meetings'),
-  get: (id: string) => request<Meeting>(`/api/meetings/${id}`),
+  list: () => run(() => store.listMeetings(true)),
+  get: (id: string) => run(async () => (await store.getMeeting(id)) ?? notFound('הפגישה לא נמצאה.')),
   create: (input: MeetingCreateInput) =>
-    request<Meeting>('/api/meetings', { method: 'POST', body: json(input) }),
-  update: (id: string, patch: Partial<Meeting>) =>
-    request<Meeting>(`/api/meetings/${id}`, { method: 'PATCH', body: json(patch) }),
-  remove: (id: string) => request<void>(`/api/meetings/${id}`, { method: 'DELETE' }),
-  uploadFile: (id: string, file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    return request<AttachedFile | Meeting>(`/api/meetings/${id}/files`, {
-      method: 'POST',
-      body: form,
-    });
-  },
-  deleteFile: (id: string, fileId: string) =>
-    request<void>(`/api/meetings/${id}/files?fileId=${encodeURIComponent(fileId)}`, {
-      method: 'DELETE',
+    run(async () => {
+      requireNonEmpty(input.title, 'כותרת');
+      requireNonEmpty(input.objective, 'מטרה');
+      if (input.meetingTypeIds.length < 1) badRequest('יש לבחור לפחות סוג פגישה אחד.');
+      if (input.participantIds.length < 2) badRequest('יש לבחור לפחות שני משתתפים.');
+      if (input.discussionRounds !== undefined) requireIntInRange(input.discussionRounds, 1, 4, 'מספר סבבי דיון');
+      await assertParticipantsAndTypesExist(input.participantIds, input.meetingTypeIds);
+      return store.createMeeting(input);
     }),
-  exportUrl: (id: string, format: 'md' | 'json') => `/api/meetings/${id}/export?format=${format}`,
+  update: (id: string, patch: MeetingUpdateInput) =>
+    run(async () => {
+      const meeting = await store.getMeeting(id);
+      if (!meeting) notFound('הפגישה לא נמצאה.');
+
+      const editingContentFields = Object.keys(patch).some((k) => k !== 'status');
+      if (editingContentFields && meeting.status !== 'draft') {
+        badRequest('לא ניתן לערוך פגישה שכבר החלה לרוץ או הסתיימה.');
+      }
+      if (patch.status === 'cancelled' && meeting.status === 'completed') {
+        badRequest('לא ניתן לבטל פגישה שכבר הושלמה.');
+      }
+      if (patch.discussionRounds !== undefined) requireIntInRange(patch.discussionRounds, 1, 4, 'מספר סבבי דיון');
+      if (patch.title !== undefined) requireNonEmpty(patch.title, 'כותרת');
+      if (patch.objective !== undefined) requireNonEmpty(patch.objective, 'מטרה');
+      if (patch.meetingTypeIds !== undefined && patch.meetingTypeIds.length < 1) {
+        badRequest('יש לבחור לפחות סוג פגישה אחד.');
+      }
+      if (patch.participantIds !== undefined && patch.participantIds.length < 2) {
+        badRequest('יש לבחור לפחות שני משתתפים.');
+      }
+      if (patch.participantIds || patch.meetingTypeIds) {
+        await assertParticipantsAndTypesExist(patch.participantIds ?? meeting.participantIds, patch.meetingTypeIds ?? meeting.meetingTypeIds);
+      }
+
+      return (await store.updateMeeting(id, patch)) ?? notFound('הפגישה לא נמצאה.');
+    }),
+  remove: (id: string) =>
+    run(async () => {
+      if (!(await store.deleteMeeting(id))) notFound('הפגישה לא נמצאה.');
+    }),
+  uploadFile: (id: string, file: File) =>
+    run(async () => {
+      const meeting = await store.getMeeting(id);
+      if (!meeting) notFound('הפגישה לא נמצאה.');
+      if (meeting.status !== 'draft') {
+        badRequest('לא ניתן להוסיף קבצי רקע לפגישה שכבר החלה לרוץ או הסתיימה.');
+      }
+      const attached = await store.saveUpload(file);
+      const updated = await store.setMeetingFiles(id, [...meeting.files, attached]);
+      return updated ?? notFound('הפגישה לא נמצאה.');
+    }),
+  deleteFile: (id: string, fileId: string) =>
+    run(async () => {
+      const meeting = await store.getMeeting(id);
+      if (!meeting) notFound('הפגישה לא נמצאה.');
+      const nextFiles = meeting.files.filter((f: AttachedFile) => f.id !== fileId);
+      await store.setMeetingFiles(id, nextFiles);
+    }),
 };
 
 // ---------------------------------------------------------------------------
-// Meeting run — SSE over a POST fetch stream (spec §6: EventSource cannot POST).
+// Meeting run — the engine runs in-process now; no SSE, no network hop.
 // ---------------------------------------------------------------------------
 
 export type RunEvent =
@@ -201,84 +300,68 @@ export interface RunMeetingHandlers {
 }
 
 /**
- * Consumes the SSE stream from POST /api/meetings/[id]/run using fetch + a
- * ReadableStream reader. Resolves when the stream ends (either via a `done`/
- * `error` event or the connection simply closing). Never throws on a
- * mid-stream disconnect — callers should fall back to polling GET
- * /api/meetings/[id] afterwards to reconcile final state.
+ * Runs the meeting engine directly in the browser and streams events to
+ * `handlers`. `signal` — when aborted — stops delivering events to the UI,
+ * but (like the old SSE version) does not stop the run itself: it keeps
+ * going and keeps persisting to IndexedDB. Never throws — engine failures
+ * surface through `handlers.onError`.
  */
 export async function runMeeting(id: string, handlers: RunMeetingHandlers): Promise<void> {
-  let res: Response;
-  try {
-    // A personal key pasted into Settings — if present — travels only in this
-    // one header, only to our own /api/meetings/[id]/run endpoint. This is the
-    // single place that attaches it; nothing else in the client sends it.
-    const storedKey = getStoredApiKey();
-    res = await fetch(`/api/meetings/${id}/run`, {
-      method: 'POST',
-      signal: handlers.signal,
-      headers: storedKey ? { 'x-anthropic-api-key': storedKey } : undefined,
-    });
-  } catch {
-    handlers.onError?.('לא ניתן היה להתחיל את הפגישה — בדקו את החיבור לשרת.');
+  await ensureSeedLoaded();
+
+  const anthropicKey = getStoredApiKey('anthropic') ?? undefined;
+  const geminiKey = getStoredApiKey('gemini') ?? undefined;
+
+  if (!anthropicKey && !geminiKey) {
+    handlers.onError?.(
+      'לא הוגדר אף מפתח API — לא Anthropic ולא Gemini. יש להזין מפתח אישי במסך ההגדרות (Settings) לפני התחלת הפגישה.'
+    );
     return;
   }
 
-  if (!res.ok || !res.body) {
-    let message = `שגיאה בהפעלת הפגישה (${res.status})`;
-    try {
-      const data = await res.json();
-      if (data?.error) message = data.error;
-    } catch {
-      // ignore — keep the generic message
-    }
-    handlers.onError?.(message);
+  const meeting = await store.getMeeting(id);
+  if (!meeting) {
+    handlers.onError?.('הפגישה לא נמצאה.');
+    return;
+  }
+  if (meeting.status === 'running') {
+    handlers.onError?.('הפגישה כבר רצה כעת.');
+    return;
+  }
+  if (meeting.status === 'completed') {
+    handlers.onError?.('הפגישה כבר הושלמה — אי אפשר להריץ אותה שוב.');
+    return;
+  }
+  if (meeting.participantIds.length < 2) {
+    handlers.onError?.('נדרשים לפחות שני משתתפים כדי להריץ את הפגישה.');
     return;
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  let aborted = false;
+  handlers.signal?.addEventListener('abort', () => {
+    aborted = true;
+  });
 
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      const events = buffer.split('\n\n');
-      buffer = events.pop() ?? '';
-
-      for (const chunk of events) {
-        const line = chunk
-          .split('\n')
-          .find((l) => l.startsWith('data:'));
-        if (!line) continue;
-        const payload = line.slice('data:'.length).trim();
-        if (!payload) continue;
-        try {
-          const parsed = JSON.parse(payload) as RunEvent;
-          switch (parsed.type) {
-            case 'phase':
-              handlers.onPhase?.(parsed.phase);
-              break;
-            case 'entry':
-              handlers.onEntry?.(parsed.entry);
-              break;
-            case 'done':
-              handlers.onDone?.(parsed.result);
-              break;
-            case 'error':
-              handlers.onError?.(parsed.message);
-              break;
-          }
-        } catch {
-          // Malformed event — skip it rather than killing the whole stream.
-        }
+  await engineRunMeeting(
+    id,
+    (event) => {
+      if (aborted) return;
+      switch (event.type) {
+        case 'phase':
+          handlers.onPhase?.(event.phase);
+          break;
+        case 'entry':
+          handlers.onEntry?.(event.entry);
+          break;
+        case 'done':
+          handlers.onDone?.(event.result);
+          break;
+        case 'error':
+          handlers.onError?.(event.message);
+          break;
       }
-    }
-  } catch (err) {
-    if ((err as { name?: string })?.name === 'AbortError') return;
-    // Mid-stream disconnect: swallow here, caller falls back to polling GET.
-  }
+    },
+    {},
+    { anthropic: anthropicKey, gemini: geminiKey }
+  );
 }

@@ -9,7 +9,7 @@
 // per-round content into the system blocks.
 
 import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
-import { SystemBlock } from '../anthropic';
+import { SystemBlock } from '../llm-types';
 import { OpeningOutput, PrepOutput } from './types';
 
 const PHASE_LABELS_HE: Record<TranscriptEntry['phase'], string> = {

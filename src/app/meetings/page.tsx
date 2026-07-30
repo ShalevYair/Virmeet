@@ -104,7 +104,7 @@ export default function MeetingsPage() {
         <div className="flex flex-col gap-3">
           {meetings.map((m) => (
             <Card key={m.id} className="flex items-center justify-between gap-4 p-4">
-              <Link href={`/meetings/${m.id}`} className="min-w-0 flex-1">
+              <Link href={`/meetings/view/?id=${m.id}`} className="min-w-0 flex-1">
                 <p className="truncate font-medium">{m.title || 'פגישה ללא כותרת'}</p>
                 <p className="mt-0.5 truncate text-xs text-black/55 dark:text-white/55">
                   {m.objective || 'ללא תיאור מטרה'}

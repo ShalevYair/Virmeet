@@ -8,11 +8,10 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 
-# Local data storage (JSON store, uploads) — keep only the placeholder.
-# Must be `data/*`, not `data/`: git never descends into an excluded
-# directory, so a negation under `data/` would be unreachable.
-data/*
-!data/.gitkeep
+# Generated at dev/build time by scripts/build-seed-manifest.mjs and
+# scripts/copy-pdf-worker.mjs — never edit or commit these by hand.
+public/seed/manifest.json
+public/pdf.worker.min.mjs
 
 # Environment
 .env
