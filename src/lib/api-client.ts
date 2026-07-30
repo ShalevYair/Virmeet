@@ -289,22 +289,25 @@ export type RunEvent =
   | { type: 'phase'; phase: MeetingPhase }
   | { type: 'entry'; entry: TranscriptEntry }
   | { type: 'done'; result: MeetingResult }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'cancelled' };
 
 export interface RunMeetingHandlers {
   onPhase?: (phase: MeetingPhase) => void;
   onEntry?: (entry: TranscriptEntry) => void;
   onDone?: (result: MeetingResult) => void;
   onError?: (message: string) => void;
+  onCancelled?: () => void;
   signal?: AbortSignal;
 }
 
 /**
  * Runs the meeting engine directly in the browser and streams events to
- * `handlers`. `signal` — when aborted — stops delivering events to the UI,
- * but (like the old SSE version) does not stop the run itself: it keeps
- * going and keeps persisting to IndexedDB. Never throws — engine failures
- * surface through `handlers.onError`.
+ * `handlers`. `signal` is forwarded straight to the engine (see
+ * `engine/runner.ts#abortIfCancelled`): aborting it stops the run itself at
+ * the next checkpoint, not just event delivery to the UI. `aborted` below
+ * still guards against events that were already in flight when the signal
+ * fired. Never throws — engine failures surface through `handlers.onError`.
  */
 export async function runMeeting(id: string, handlers: RunMeetingHandlers): Promise<void> {
   await ensureSeedLoaded();
@@ -359,9 +362,13 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
         case 'error':
           handlers.onError?.(event.message);
           break;
+        case 'cancelled':
+          handlers.onCancelled?.();
+          break;
       }
     },
     {},
-    { anthropic: anthropicKey, gemini: geminiKey }
+    { anthropic: anthropicKey, gemini: geminiKey },
+    handlers.signal
   );
 }

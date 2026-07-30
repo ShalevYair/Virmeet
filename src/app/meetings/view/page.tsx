@@ -87,8 +87,9 @@ function PhaseRail({ current, status }: { current: MeetingPhase; status: Meeting
     <Card className="flex items-center gap-1 overflow-x-auto p-4">
       {PHASE_ORDER.map((phase, i) => {
         const isDone = allDone || i < currentIndex;
-        const isCurrent = !allDone && i === currentIndex && status !== 'failed';
+        const isCurrent = status === 'running' && i === currentIndex;
         const isFailedHere = status === 'failed' && i === currentIndex;
+        const isCancelledHere = status === 'cancelled' && i === currentIndex;
         return (
           <div key={phase} className="flex flex-1 items-center gap-1">
             <div className="flex flex-col items-center gap-1.5">
@@ -96,18 +97,20 @@ function PhaseRail({ current, status }: { current: MeetingPhase; status: Meeting
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
                   isFailedHere
                     ? 'bg-red-600 text-white'
-                    : isCurrent
-                      ? 'bg-blue-600 text-white'
-                      : isDone
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-black/10 text-black/50 dark:bg-white/10 dark:text-white/50'
+                    : isCancelledHere
+                      ? 'bg-amber-500 text-white'
+                      : isCurrent
+                        ? 'bg-blue-600 text-white'
+                        : isDone
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-black/10 text-black/50 dark:bg-white/10 dark:text-white/50'
                 }`}
               >
-                {isDone && !isFailedHere ? '✓' : i + 1}
+                {isDone && !isFailedHere && !isCancelledHere ? '✓' : i + 1}
               </div>
               <span
                 className={`whitespace-nowrap text-xs ${
-                  isCurrent || isFailedHere ? 'font-semibold' : 'text-black/55 dark:text-white/55'
+                  isCurrent || isFailedHere || isCancelledHere ? 'font-semibold' : 'text-black/55 dark:text-white/55'
                 }`}
               >
                 {PHASE_LABEL[phase]}
@@ -409,6 +412,10 @@ function MeetingRunInner({ id }: { id: string }) {
               setStatus('failed');
               stopPolling();
             },
+            onCancelled: () => {
+              setStatus('cancelled');
+              stopPolling();
+            },
           }).then(async () => {
             // Stream ended without a terminal event — reconcile with
             // IndexedDB instead of guessing.
@@ -528,6 +535,13 @@ function MeetingRunInner({ id }: { id: string }) {
         <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-400">
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
           הפגישה מתקיימת כעת…
+        </div>
+      )}
+
+      {status === 'cancelled' && (
+        <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
+          <span className="h-2 w-2 rounded-full bg-amber-500" />
+          הפגישה בוטלה על ידי המשתמש. התמליל שנוצר עד כה נשמר.
         </div>
       )}
 

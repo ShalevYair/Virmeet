@@ -83,18 +83,28 @@ function makeEntry(
  * matches that call's model provider) and nowhere else: they are never added
  * to `meeting`, `transcript`, or any persisted patch, so they can't reach
  * IndexedDB or the exported transcript.
+ *
+ * `signal` — when aborted, the run stops at the next checkpoint (see
+ * `abortIfCancelled`) instead of running to completion in the background.
+ * The meeting is marked `status:'cancelled'`; the transcript and usage
+ * accumulated so far are preserved.
  */
 export async function runMeeting(
   meetingId: string,
   onEvent: OnEvent,
   overrideDeps: Partial<RunMeetingDeps> = {},
-  apiKeys: { anthropic?: string; gemini?: string } = {}
+  apiKeys: { anthropic?: string; gemini?: string } = {},
+  signal?: AbortSignal
 ): Promise<void> {
   const deps: RunMeetingDeps = { ...defaultDeps, ...overrideDeps };
 
   /** The personal key (if any) matching `model`'s provider — Anthropic vs Gemini. */
   function apiKeyFor(model: string): string | undefined {
     return getModelProvider(model) === 'gemini' ? apiKeys.gemini : apiKeys.anthropic;
+  }
+
+  function isAborted(): boolean {
+    return signal?.aborted === true;
   }
 
   // The facilitator doesn't have to run on Anthropic — a meeting where every
@@ -135,7 +145,15 @@ export async function runMeeting(
   const budget = new CallBudget(new Map(participants.map((p) => [p.id, p.maxApiCalls])));
 
   async function persist(patch: Partial<Meeting> = {}): Promise<void> {
-    await deps.updateMeeting(meetingId, { transcript, usage, ...patch });
+    const fullPatch: Partial<Meeting> = { transcript, usage, ...patch };
+    // A cancelled run must never have a later write resurrect it as
+    // 'running' or 'completed' — transcript/usage still get through, so
+    // whatever was already said (and already paid for) is preserved.
+    if (isAborted()) {
+      delete fullPatch.status;
+      delete fullPatch.completedAt;
+    }
+    await deps.updateMeeting(meetingId, fullPatch);
   }
 
   async function emitEntry(entry: TranscriptEntry): Promise<void> {
@@ -147,6 +165,22 @@ export async function runMeeting(
   async function emitPhase(phase: PhaseName): Promise<void> {
     onEvent({ type: 'phase', phase });
     await persist({ status: 'running' });
+  }
+
+  /**
+   * Checkpoint called at every point the run could safely stop. Returns
+   * `true` (after logging a system line, marking the meeting `cancelled`,
+   * and emitting `{type:'cancelled'}`) iff `signal` was aborted — callers
+   * must `return` immediately when it does.
+   */
+  async function abortIfCancelled(phase: PhaseName, round?: number): Promise<boolean> {
+    if (!isAborted()) return false;
+    await emitEntry(
+      makeEntry(phase, 'system', 'מערכת', 'הפגישה בוטלה על ידי המשתמש. הדיון נעצר.', round !== undefined ? { round } : {})
+    );
+    await deps.updateMeeting(meetingId, { status: 'cancelled' });
+    onEvent({ type: 'cancelled' });
+    return true;
   }
 
   function recordApiCall(): void {
@@ -162,11 +196,13 @@ export async function runMeeting(
     };
   }
 
+  if (await abortIfCancelled('prep')) return;
   await persist({ status: 'running', error: null });
 
   // -------------------------------------------------------------------
   // Phase 0 — prep (parallel, no visibility into other personas' output)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('prep')) return;
   await emitPhase('prep');
   const prepResults = new Map<string, PrepOutput>();
 
@@ -190,6 +226,8 @@ export async function runMeeting(
       }
     })
   );
+
+  if (await abortIfCancelled('prep')) return;
 
   // Process in participant order (not settle order) so the transcript reads
   // deterministically even though the calls above ran concurrently.
@@ -237,6 +275,7 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   // Phase 1 — opening (facilitator, single call)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('opening')) return;
   await emitPhase('opening');
   let opening: OpeningOutput = { framing: '', conflicts: [] };
   {
@@ -299,11 +338,13 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   // Phase 2 — discussion (N rounds, sequential turns)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('discussion')) return;
   await emitPhase('discussion');
   const totalRounds = meeting.discussionRounds;
 
   for (let round = 1; round <= totalRounds; round++) {
     for (const persona of participants) {
+      if (await abortIfCancelled('discussion', round)) return;
       if (!budget.canCall(persona.id)) {
         if (budget.shouldAnnounceExhausted(persona.id)) {
           await emitEntry(
@@ -368,6 +409,7 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   // Phase 3 — convergence (facilitator, single call)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('convergence')) return;
   await emitPhase('convergence');
   let convergenceSummary = '';
   {
@@ -410,6 +452,7 @@ export async function runMeeting(
   // A failure here — and only here — marks the meeting `status:'failed'`.
   // The transcript accumulated above has already been persisted throughout.
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('extraction')) return;
   await emitPhase('extraction');
   try {
     recordApiCall();
