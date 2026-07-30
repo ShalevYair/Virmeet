@@ -40,11 +40,11 @@ function isRetryableError(err: unknown): boolean {
   );
 }
 
-/** Builds the `system` array with cache_control on the LAST block only (spec §0). */
+/** Builds the `system` array with cache_control on every block marked `cacheBreakpoint`, and always on the last block (Anthropic supports up to 4 breakpoints). */
 function buildSystemParam(system: SystemBlock[]): Anthropic.TextBlockParam[] {
   return system.map((block, idx): Anthropic.TextBlockParam => {
     const isLast = idx === system.length - 1;
-    return isLast
+    return block.cacheBreakpoint || isLast
       ? { type: 'text', text: block.text, cache_control: { type: 'ephemeral' } }
       : { type: 'text', text: block.text };
   });

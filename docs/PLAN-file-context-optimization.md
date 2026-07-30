@@ -438,15 +438,21 @@ export const FILE_CONTEXT_MODE: FileContextMode = 'summary';
 **שלב 0 — מדידה**
 - [ ] הרץ פגישה בסיסית עם קובץ משותף גדול, שמור את `usage` (סעיף 3)
 
+  > **לא בוצע בסבב הזה.** מבצע הביצוע (סוכן) לא מחזיק מפתח API אמיתי בסביבה
+  > הזו, ולכן לא יכול היה להריץ פגישה חיה ולמדוד `usage`. שלב 1 בוצע ואומת
+  > דרך `typecheck`/`build` בלבד — **המדידה בפועל (baseline מול after) עדיין
+  > פתוחה ודורשת הרצה על האתר החי עם מפתח אמיתי**, בדיוק כפי שסעיף 4.5 דורש
+  > לפני שממשיכים לשלב 2.
+
 **שלב 1 — cache**
-- [ ] `cacheBreakpoint` ב-`SystemBlock` (`llm-types.ts`)
-- [ ] `buildSystemParam` תומך בכמה נקודות (`anthropic.ts`) + עדכון ההערה
-- [ ] `buildFilesBlock(files, heading)` עם כותרות נפרדות
-- [ ] `buildPersonaSystemBlocks(org, persona, meeting)` — 4 בלוקים בסדר מסעיף 4.1
-- [ ] `buildFacilitatorSystemBlocks(org, meeting)` — 3 בלוקים
-- [ ] הסר קבצים מ-`meetingHeaderBlock`
-- [ ] עדכן 5 אתרי קריאה ב-`runner.ts`
-- [ ] **מדוד והשווה. עצור והחלט אם להמשיך.**
+- [x] `cacheBreakpoint` ב-`SystemBlock` (`llm-types.ts`)
+- [x] `buildSystemParam` תומך בכמה נקודות (`anthropic.ts`) + עדכון ההערה
+- [x] `buildFilesBlock(files, heading)` עם כותרות נפרדות
+- [x] `buildPersonaSystemBlocks(org, persona, meeting)` — 4 בלוקים בסדר מסעיף 4.1
+- [x] `buildFacilitatorSystemBlocks(org, meeting)` — 3 בלוקים
+- [x] הסר קבצים מ-`meetingHeaderBlock`
+- [x] עדכן 5 אתרי קריאה ב-`runner.ts`
+- [ ] **מדוד והשווה. עצור והחלט אם להמשיך.** (ראה הערה בשלב 0 — לא בוצע כאן)
 
 **שלב 2 — תמציות**
 - [ ] שדות `summary`/`summaryModel`/`summaryAt`/`charCount` ב-`AttachedFile`

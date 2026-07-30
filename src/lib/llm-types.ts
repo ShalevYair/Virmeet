@@ -5,6 +5,8 @@
 export interface SystemBlock {
   type: 'text';
   text: string;
+  /** If true, a cache breakpoint is placed here. Anthropic supports up to 4. */
+  cacheBreakpoint?: boolean;
 }
 
 export interface CallModelMessage {
