@@ -367,6 +367,18 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
     return;
   }
 
+  // Only 'running' and 'completed' meetings are blocked above — a meeting
+  // left 'cancelled' (or 'failed') is still a 'draft' status away from being
+  // run again, and the engine seeds its transcript/usage from whatever is
+  // already stored (runner.ts). Reset both before starting so a re-run never
+  // accumulates onto a stale run's transcript or double-counts its usage.
+  // A meeting that's never been run has both already blank, so this is a
+  // no-op on a genuine first run.
+  await store.updateMeeting(id, {
+    transcript: [],
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+  });
+
   let aborted = false;
   handlers.signal?.addEventListener('abort', () => {
     aborted = true;
