@@ -96,6 +96,9 @@ export async function callModel(opts: CallModelOptions): Promise<CallModelResult
     config.responseJsonSchema = opts.jsonSchema;
   }
   if (opts.webSearch) {
+    // Verified against Gemini API docs: Gemini 3 models support combining
+    // structured output with built-in tools including Grounding with Google
+    // Search in the same request — this is not a blocked combination.
     config.tools = [{ googleSearch: {} }];
   }
 
