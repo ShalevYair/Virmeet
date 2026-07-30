@@ -106,6 +106,37 @@ async function writeJsonLocked(filePath: string, data: unknown): Promise<void> {
   return withFileLock(filePath, () => writeJsonAtomic(filePath, data));
 }
 
+/**
+ * Read-modify-write a JSON file as a single atomic transaction under the
+ * file's write lock. This is the piece that makes create/update/delete safe
+ * under concurrency: listPersonas() + writeJsonLocked() as two *separate*
+ * lock acquisitions would let two concurrent createPersona() calls both read
+ * the same "before" array and clobber each other's write. Holding the lock
+ * across the whole read -> mutate -> write sequence closes that gap.
+ */
+async function transact<T, R>(
+  filePath: string,
+  seedFactory: () => T,
+  mutator: (current: T) => { next: T; result: R }
+): Promise<R> {
+  return withFileLock(filePath, async () => {
+    let current: T;
+    if (!(await fileExists(filePath))) {
+      current = seedFactory();
+    } else {
+      const raw = await fs.readFile(filePath, 'utf-8');
+      try {
+        current = JSON.parse(raw) as T;
+      } catch {
+        current = seedFactory();
+      }
+    }
+    const { next, result } = mutator(current);
+    await writeJsonAtomic(filePath, next);
+    return result;
+  });
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -137,68 +168,72 @@ export async function getPersona(id: string): Promise<Persona | null> {
 }
 
 export async function createPersona(input: PersonaInput): Promise<Persona> {
-  const personas = await listPersonas();
-  const now = nowIso();
-  const persona: Persona = {
-    id: randomUUID(),
-    name: input.name,
-    role: input.role,
-    organization: input.organization,
-    color: input.color,
-    prompt: input.prompt,
-    model: input.model,
-    webAccess: input.webAccess,
-    maxApiCalls: input.maxApiCalls,
-    maxWebSearches: input.maxWebSearches,
-    files: [],
-    isActive: input.isActive ?? true,
-    createdAt: now,
-    updatedAt: now,
-  };
-  personas.push(persona);
-  await writeJsonLocked(PERSONAS_FILE, personas);
-  return persona;
+  return transact(PERSONAS_FILE, seedPersonas, (personas) => {
+    const now = nowIso();
+    const persona: Persona = {
+      id: randomUUID(),
+      name: input.name,
+      role: input.role,
+      organization: input.organization,
+      color: input.color,
+      prompt: input.prompt,
+      model: input.model,
+      webAccess: input.webAccess,
+      maxApiCalls: input.maxApiCalls,
+      maxWebSearches: input.maxWebSearches,
+      files: [],
+      isActive: input.isActive ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return { next: [...personas, persona], result: persona };
+  });
 }
 
 export async function updatePersona(
   id: string,
   patch: Partial<PersonaInput>
 ): Promise<Persona | null> {
-  const personas = await listPersonas();
-  const idx = personas.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
-  const updated: Persona = {
-    ...personas[idx],
-    ...patch,
-    id: personas[idx].id,
-    files: personas[idx].files,
-    createdAt: personas[idx].createdAt,
-    updatedAt: nowIso(),
-  };
-  personas[idx] = updated;
-  await writeJsonLocked(PERSONAS_FILE, personas);
-  return updated;
+  return transact(PERSONAS_FILE, seedPersonas, (personas) => {
+    const idx = personas.findIndex((p) => p.id === id);
+    if (idx === -1) return { next: personas, result: null };
+    const updated: Persona = {
+      ...personas[idx],
+      ...patch,
+      id: personas[idx].id,
+      files: personas[idx].files,
+      createdAt: personas[idx].createdAt,
+      updatedAt: nowIso(),
+    };
+    const next = [...personas];
+    next[idx] = updated;
+    return { next, result: updated };
+  });
 }
 
 export async function deletePersona(id: string): Promise<boolean> {
-  const personas = await listPersonas();
-  const idx = personas.findIndex((p) => p.id === id);
-  if (idx === -1) return false;
-  const [removed] = personas.splice(idx, 1);
-  await writeJsonLocked(PERSONAS_FILE, personas);
-  // Best-effort cleanup of the persona's upload directory.
-  await fs.rm(path.join(UPLOADS_DIR, id), { recursive: true, force: true });
-  return removed !== undefined;
+  const removed = await transact(PERSONAS_FILE, seedPersonas, (personas) => {
+    const idx = personas.findIndex((p) => p.id === id);
+    if (idx === -1) return { next: personas, result: false };
+    const next = personas.filter((p) => p.id !== id);
+    return { next, result: true };
+  });
+  if (removed) {
+    // Best-effort cleanup of the persona's upload directory.
+    await fs.rm(path.join(UPLOADS_DIR, id), { recursive: true, force: true });
+  }
+  return removed;
 }
 
 /** Persist an updated files[] array on a persona (used by upload/delete file routes). */
 async function setPersonaFiles(id: string, files: AttachedFile[]): Promise<Persona | null> {
-  const personas = await listPersonas();
-  const idx = personas.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
-  personas[idx] = { ...personas[idx], files, updatedAt: nowIso() };
-  await writeJsonLocked(PERSONAS_FILE, personas);
-  return personas[idx];
+  return transact(PERSONAS_FILE, seedPersonas, (personas) => {
+    const idx = personas.findIndex((p) => p.id === id);
+    if (idx === -1) return { next: personas, result: null };
+    const next = [...personas];
+    next[idx] = { ...next[idx], files, updatedAt: nowIso() };
+    return { next, result: next[idx] };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -221,53 +256,53 @@ export async function getMeetingType(id: string): Promise<MeetingType | null> {
 }
 
 export async function createMeetingType(input: MeetingTypeInput): Promise<MeetingType> {
-  const types = await listMeetingTypes();
-  const now = nowIso();
-  const meetingType: MeetingType = {
-    id: randomUUID(),
-    title: input.title,
-    shortDescription: input.shortDescription,
-    prompt: input.prompt,
-    isBuiltIn: false,
-    createdAt: now,
-    updatedAt: now,
-  };
-  types.push(meetingType);
-  await writeJsonLocked(MEETING_TYPES_FILE, types);
-  return meetingType;
+  return transact(MEETING_TYPES_FILE, seedMeetingTypes, (types) => {
+    const now = nowIso();
+    const meetingType: MeetingType = {
+      id: randomUUID(),
+      title: input.title,
+      shortDescription: input.shortDescription,
+      prompt: input.prompt,
+      isBuiltIn: false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    return { next: [...types, meetingType], result: meetingType };
+  });
 }
 
 export async function updateMeetingType(
   id: string,
   patch: Partial<MeetingTypeInput>
 ): Promise<MeetingType | null> {
-  const types = await listMeetingTypes();
-  const idx = types.findIndex((t) => t.id === id);
-  if (idx === -1) return null;
-  const updated: MeetingType = {
-    ...types[idx],
-    ...patch,
-    id: types[idx].id,
-    isBuiltIn: types[idx].isBuiltIn,
-    createdAt: types[idx].createdAt,
-    updatedAt: nowIso(),
-  };
-  types[idx] = updated;
-  await writeJsonLocked(MEETING_TYPES_FILE, types);
-  return updated;
+  return transact(MEETING_TYPES_FILE, seedMeetingTypes, (types) => {
+    const idx = types.findIndex((t) => t.id === id);
+    if (idx === -1) return { next: types, result: null };
+    const updated: MeetingType = {
+      ...types[idx],
+      ...patch,
+      id: types[idx].id,
+      isBuiltIn: types[idx].isBuiltIn,
+      createdAt: types[idx].createdAt,
+      updatedAt: nowIso(),
+    };
+    const next = [...types];
+    next[idx] = updated;
+    return { next, result: updated };
+  });
 }
 
 /** Throws if the meeting type is built-in (built-ins are editable, not deletable). */
 export async function deleteMeetingType(id: string): Promise<boolean> {
-  const types = await listMeetingTypes();
-  const idx = types.findIndex((t) => t.id === id);
-  if (idx === -1) return false;
-  if (types[idx].isBuiltIn) {
-    throw new Error('לא ניתן למחוק סוג פגישה מובנה');
-  }
-  types.splice(idx, 1);
-  await writeJsonLocked(MEETING_TYPES_FILE, types);
-  return true;
+  return transact(MEETING_TYPES_FILE, seedMeetingTypes, (types) => {
+    const idx = types.findIndex((t) => t.id === id);
+    if (idx === -1) return { next: types, result: false };
+    if (types[idx].isBuiltIn) {
+      throw new Error('לא ניתן למחוק סוג פגישה מובנה');
+    }
+    const next = types.filter((t) => t.id !== id);
+    return { next, result: true };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -281,10 +316,10 @@ export async function getOrgSettings(): Promise<OrgSettings> {
 export async function updateOrgSettings(
   patch: Partial<Omit<OrgSettings, 'updatedAt'>>
 ): Promise<OrgSettings> {
-  const current = await getOrgSettings();
-  const updated: OrgSettings = { ...current, ...patch, updatedAt: nowIso() };
-  await writeJsonLocked(ORG_FILE, updated);
-  return updated;
+  return transact(ORG_FILE, seedOrgSettings, (current) => {
+    const updated: OrgSettings = { ...current, ...patch, updatedAt: nowIso() };
+    return { next: updated, result: updated };
+  });
 }
 
 // ---------------------------------------------------------------------------
