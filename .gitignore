@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local data storage (JSON store, uploads) — keep only the placeholder.
+# Must be `data/*`, not `data/`: git never descends into an excluded
+# directory, so a negation under `data/` would be unreachable.
+data/*
+!data/.gitkeep
+
+# Environment
+.env
+.env*.local
+
+# Misc
+.DS_Store
+npm-debug.log*
