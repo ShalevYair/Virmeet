@@ -1,34 +1,24 @@
-// Virmeet — thin server-side wrapper around @google/genai, mirroring
-// anthropic.ts's callModel() shape so llm.ts can dispatch between the two
-// providers without the engine caring which one is behind a given model id.
-// Server-only. Never import this from client components.
+// Virmeet — thin wrapper around @google/genai, called directly from the
+// browser, mirroring anthropic.ts's callModel() shape so llm.ts can dispatch
+// between the two providers without the engine caring which one is behind a
+// given model id. There is no server component anymore — every key comes
+// from the caller, which reads it out of localStorage (see api-key.ts).
 
 import { GoogleGenAI, ApiError as GeminiApiError } from '@google/genai';
 import type { CallModelOptions, CallModelResult, CallModelUsage, SystemBlock } from './llm-types';
 
-let client: GoogleGenAI | null = null;
-
 /**
- * Lazily constructs the Gemini client. `explicitApiKey` — when present — is a
- * key the browser sent on this request (see the run route) and takes
- * priority over GEMINI_API_KEY. Mirrors anthropic.ts#getClient: a fresh
- * client is built for an explicit key on every call so it never lingers in
- * the shared module-level singleton. Throws a Hebrew error if neither source
- * has a key.
+ * Constructs a Gemini client for `apiKey`. Mirrors anthropic.ts#getClient: a
+ * fresh client is built on every call so a key never lingers beyond the call
+ * that needed it. Throws a Hebrew error if no key was supplied.
  */
-export function getClient(explicitApiKey?: string): GoogleGenAI {
-  if (explicitApiKey) {
-    return new GoogleGenAI({ apiKey: explicitApiKey });
-  }
-  if (!process.env.GEMINI_API_KEY) {
+export function getClient(apiKey?: string): GoogleGenAI {
+  if (!apiKey) {
     throw new Error(
-      'מפתח ה-API של Gemini לא הוגדר. אפשר להגדיר אותו בקובץ .env.local בצד השרת (GEMINI_API_KEY), או להזין מפתח אישי במסך ההגדרות (Settings) בדפדפן.'
+      'מפתח ה-API של Gemini לא הוגדר. יש להזין מפתח אישי במסך ההגדרות (Settings).'
     );
   }
-  if (!client) {
-    client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return client;
+  return new GoogleGenAI({ apiKey });
 }
 
 const RETRY_DELAYS_MS = [2000, 4000, 8000];

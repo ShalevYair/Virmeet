@@ -1,9 +1,9 @@
 'use client';
 
 // Virmeet — lets a user paste a personal Anthropic and/or Gemini API key,
-// stored only in this browser's localStorage. Never sent anywhere except as
-// the x-anthropic-api-key / x-gemini-api-key header on
-// POST /api/meetings/[id]/run (see api-client.ts).
+// stored only in this browser's localStorage. Sent directly from this
+// browser to the Anthropic/Gemini API when a meeting runs (see
+// lib/anthropic.ts, lib/gemini.ts) — there is no server in between.
 
 import { useEffect, useState } from 'react';
 import {
@@ -139,9 +139,10 @@ export function ApiKeySettings() {
       ))}
 
       <p className="border-t border-black/10 pt-4 text-xs text-black/50 dark:border-white/10 dark:text-white/50">
-        המפתחות נשמרים רק ב-localStorage של הדפדפן, על המכשיר הזה בלבד — הם לא נשלחים לשום מקום מלבד לשרת
-        של Virmeet, ורק כדי להריץ פגישה בפועל מול ה-API של הספק המתאים. כל סקריפט שרץ בדף יכול לקרוא אותם,
-        ולכן זה מתאים לשימוש אישי במכשיר שלכם ולא למחשב משותף.
+        Virmeet הוא אתר סטטי ללא שרת משלו — המפתחות נשמרים רק ב-localStorage של הדפדפן, על המכשיר הזה
+        בלבד, ונשלחים ישירות מהדפדפן אל ה-API של הספק המתאים (Anthropic / Google) כדי להריץ פגישה, בלי
+        לעבור דרך שום שרת של Virmeet. כל סקריפט שרץ בדף יכול לקרוא אותם, ולכן זה מתאים לשימוש אישי
+        במכשיר שלכם ולא למחשב משותף.
       </p>
     </Card>
   );

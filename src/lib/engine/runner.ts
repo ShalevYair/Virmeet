@@ -5,7 +5,6 @@
 // free-form round-robin. See prompts.ts for the Hebrew prompt text and
 // schemas.ts for the structured-output JSON schemas.
 
-import { randomUUID } from 'crypto';
 import {
   Meeting,
   MeetingResult,
@@ -57,7 +56,7 @@ function makeEntry(
   extra: Partial<Pick<TranscriptEntry, 'round' | 'webSearches' | 'usage'>> = {}
 ): TranscriptEntry {
   return {
-    id: randomUUID(),
+    id: crypto.randomUUID(),
     phase,
     speakerId,
     speakerName,
@@ -69,21 +68,21 @@ function makeEntry(
 
 /**
  * Runs a meeting end-to-end through all five phases, streaming events via
- * `onEvent` and persisting to disk after every phase transition and every
- * transcript entry. Never rejects: unexpected failures are reported through
- * `onEvent({type:'error', ...})` and, where applicable, by marking the
- * meeting `status:'failed'` — callers (the SSE route) just drain events until
- * this promise settles.
+ * `onEvent` and persisting to IndexedDB after every phase transition and
+ * every transcript entry. Never rejects: unexpected failures are reported
+ * through `onEvent({type:'error', ...})` and, where applicable, by marking
+ * the meeting `status:'failed'` — callers just drain events until this
+ * promise settles.
  *
  * `overrideDeps` exists purely for tests: production callers should invoke
  * `runMeeting(meetingId, onEvent)` and let it use the real store + the
  * Anthropic/Gemini clients (see ../llm.ts).
  *
- * `apiKeys` — personal keys the run route read off the browser's
- * x-anthropic-api-key / x-gemini-api-key headers — are forwarded to every
- * model call below (whichever key matches that call's model provider) and
- * nowhere else: they are never added to `meeting`, `transcript`, or any
- * persisted patch, so they can't reach data/ or the exported transcript.
+ * `apiKeys` — personal keys read out of localStorage in the browser (see
+ * api-key.ts) — are forwarded to every model call below (whichever key
+ * matches that call's model provider) and nowhere else: they are never added
+ * to `meeting`, `transcript`, or any persisted patch, so they can't reach
+ * IndexedDB or the exported transcript.
  */
 export async function runMeeting(
   meetingId: string,
@@ -441,7 +440,7 @@ export async function runMeeting(
       risks: raw.risks,
       modelAssumptions: raw.modelAssumptions,
       tasks: raw.tasks.map((t) => ({
-        id: randomUUID(),
+        id: crypto.randomUUID(),
         title: t.title,
         description: t.description,
         ownerPersonaId: personaIdByName.get(t.ownerName) ?? null,

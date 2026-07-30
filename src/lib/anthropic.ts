@@ -1,34 +1,27 @@
-// Virmeet — thin server-side wrapper around @anthropic-ai/sdk (spec §0, §4).
-// Server-only. Never import this from client components.
+// Virmeet — thin wrapper around @anthropic-ai/sdk, called directly from the
+// browser (spec §0, §4, §2.4 of docs/PLAN-static-github-pages.md). There is
+// no server component anymore — every key comes from the caller, which reads
+// it out of localStorage (see api-key.ts).
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { CallModelOptions, CallModelResult, CallModelUsage, SystemBlock, WebSearchQuery } from './llm-types';
 
-let client: Anthropic | null = null;
-
 /**
- * Lazily constructs the Anthropic client. `explicitApiKey` — when present —
- * is a key the browser sent on this request (see the run route) and takes
- * priority over ANTHROPIC_API_KEY. It is never cached or logged: a fresh,
- * one-off client is built for it on every call so a user-supplied key never
- * lingers in the shared module-level singleton or leaks across requests.
- * Throws a Hebrew error if neither source has a key.
+ * Constructs an Anthropic client for `apiKey`. A fresh client is built on
+ * every call rather than cached as a module-level singleton, so a key never
+ * lingers beyond the call that needed it. Throws a Hebrew error if no key was
+ * supplied. `dangerouslyAllowBrowser` is required because this SDK call now
+ * runs in the browser, not on a server — see the security note in README.md.
  */
-export function getClient(explicitApiKey?: string): Anthropic {
-  if (explicitApiKey) {
-    // We own retries ourselves (see callModel) — disable the SDK's built-in
-    // retry so backoff timing stays deterministic and under our control.
-    return new Anthropic({ apiKey: explicitApiKey, maxRetries: 0 });
-  }
-  if (!process.env.ANTHROPIC_API_KEY) {
+export function getClient(apiKey?: string): Anthropic {
+  if (!apiKey) {
     throw new Error(
-      'מפתח ה-API של Anthropic לא הוגדר. אפשר להגדיר אותו בקובץ .env.local בצד השרת, או להזין מפתח אישי במסך ההגדרות (Settings) בדפדפן.'
+      'מפתח ה-API של Anthropic לא הוגדר. יש להזין מפתח אישי במסך ההגדרות (Settings).'
     );
   }
-  if (!client) {
-    client = new Anthropic({ maxRetries: 0 });
-  }
-  return client;
+  // We own retries ourselves (see callModel) — disable the SDK's built-in
+  // retry so backoff timing stays deterministic and under our control.
+  return new Anthropic({ apiKey, maxRetries: 0, dangerouslyAllowBrowser: true });
 }
 
 const RETRY_DELAYS_MS = [2000, 4000, 8000];

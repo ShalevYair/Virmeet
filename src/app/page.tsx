@@ -95,7 +95,7 @@ export default function DashboardPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {recent.map((m) => (
-            <Link key={m.id} href={`/meetings/${m.id}`}>
+            <Link key={m.id} href={`/meetings/view/?id=${m.id}`}>
               <Card className="flex items-center justify-between gap-4 p-4 transition-shadow hover:shadow-md">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{m.title || 'פגישה ללא כותרת'}</p>

@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { ApiError, orgApi } from '@/lib/api-client';
+import { ensureSeedLoaded } from '@/lib/seed-loader';
 import type { OrgSettings } from '@/lib/types';
 import { Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { ApiKeySettings } from '@/components/ApiKeySettings';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<OrgSettings | null>(null);
@@ -12,6 +14,9 @@ export default function SettingsPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [reloadOpen, setReloadOpen] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [reloadMessage, setReloadMessage] = useState<string | null>(null);
 
   function load() {
     setError(null);
@@ -47,6 +52,27 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleReloadFromRepo() {
+    setReloading(true);
+    setReloadMessage(null);
+    try {
+      const result = await ensureSeedLoaded({ force: true });
+      if (result.status === 'error') {
+        setReloadMessage(result.warning ?? 'טעינה מחדש מהריפו נכשלה.');
+      } else {
+        setReloadMessage(
+          `הטעינה הושלמה — ${result.personaCount ?? 0} פרסונות ו-${result.meetingTypeCount ?? 0} סוגי פגישות נטענו מחדש מהריפו.`
+        );
+        load();
+      }
+    } catch (err) {
+      setReloadMessage(err instanceof Error ? err.message : 'טעינה מחדש מהריפו נכשלה.');
+    } finally {
+      setReloading(false);
+      setReloadOpen(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -59,6 +85,21 @@ export default function SettingsPage() {
       {error && <ErrorBanner message={error} onRetry={load} />}
 
       <ApiKeySettings />
+
+      <Card className="flex flex-col gap-3 p-5">
+        <h2 className="text-sm font-semibold">פרסונות וסוגי פגישות מהריפו</h2>
+        <p className="text-sm text-black/60 dark:text-white/60">
+          בכניסה ראשונה נטענות אוטומטית פרסונות וסוגי פגישות מהריפו, בלי לדרוס עריכות מקומיות.
+          הכפתור הזה טוען אותן מחדש במפורש ו<strong>דורס</strong> כל עריכה מקומית שנעשתה לפרסונות
+          ולסוגי הפגישות הבסיסיים (לא נוגע בפרסונות או בפגישות שיצרתם בעצמכם).
+        </p>
+        {reloadMessage && <p className="text-sm text-black/70 dark:text-white/70">{reloadMessage}</p>}
+        <div>
+          <Button variant="secondary" onClick={() => setReloadOpen(true)}>
+            טען מחדש מהריפו
+          </Button>
+        </div>
+      </Card>
 
       {!settings ? (
         <div className="flex flex-col gap-4">
@@ -106,6 +147,17 @@ export default function SettingsPage() {
           </div>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={reloadOpen}
+        title="לטעון מחדש מהריפו?"
+        description="עריכות מקומיות לפרסונות ולסוגי הפגישות הבסיסיים (מהריפו) יאבדו ויוחלפו בגרסה
+          העדכנית מהריפו. פרסונות ופגישות שיצרתם בעצמכם לא יושפעו."
+        confirmLabel="טען מחדש ודרוס"
+        busy={reloading}
+        onConfirm={handleReloadFromRepo}
+        onCancel={() => setReloadOpen(false)}
+      />
     </div>
   );
 }

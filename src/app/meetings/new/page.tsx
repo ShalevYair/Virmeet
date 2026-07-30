@@ -1,8 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, healthApi, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
+import { ApiError, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
 import { getModelProvider, type MeetingType, type ModelProvider, type Persona } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
@@ -39,10 +40,6 @@ export default function NewMeetingPage() {
     anthropic: true,
     gemini: true,
   });
-  const [serverKeys, setServerKeys] = useState<Record<ModelProvider, boolean>>({
-    anthropic: true,
-    gemini: true,
-  });
 
   function load() {
     setLoadError(null);
@@ -61,26 +58,21 @@ export default function NewMeetingPage() {
       anthropic: Boolean(getStoredApiKey('anthropic')),
       gemini: Boolean(getStoredApiKey('gemini')),
     });
-    healthApi
-      .get()
-      .then((res) =>
-        setServerKeys({ anthropic: res.anthropicKeyConfigured, gemini: res.geminiKeyConfigured })
-      )
-      .catch(() => setServerKeys({ anthropic: true, gemini: true })); // fail open — don't nag if the health check itself fails
   }, []);
 
   const activePersonas = useMemo(() => (personas ?? []).filter((p) => p.isActive), [personas]);
 
   // The facilitator always runs on Anthropic; add each selected participant's
   // provider so the banner below only warns about providers this meeting
-  // actually needs.
+  // actually needs. There's no server key anymore — only what's in this
+  // browser's localStorage (see api-key.ts).
   const missingProviders = useMemo(() => {
     const needed = new Set<ModelProvider>(['anthropic']);
     for (const p of activePersonas) {
       if (participantIds.includes(p.id)) needed.add(getModelProvider(p.model));
     }
-    return [...needed].filter((provider) => !serverKeys[provider] && !browserKeys[provider]);
-  }, [activePersonas, participantIds, serverKeys, browserKeys]);
+    return [...needed].filter((provider) => !browserKeys[provider]);
+  }, [activePersonas, participantIds, browserKeys]);
 
   function toggleType(id: string) {
     setSelectedTypeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -120,7 +112,7 @@ export default function NewMeetingPage() {
       for (const file of stagedFiles) {
         await meetingsApi.uploadFile(meeting.id, file);
       }
-      router.push(`/meetings/${meeting.id}`);
+      router.push(`/meetings/view/?id=${meeting.id}`);
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'יצירת הפגישה נכשלה');
       setSubmitting(false);
@@ -218,9 +210,9 @@ export default function NewMeetingPage() {
         {activePersonas.length === 0 ? (
           <p className="text-sm text-black/55 dark:text-white/55">
             אין משתתפים פעילים. הוסיפו משתתפים בעמוד{' '}
-            <a href="/personas" className="text-blue-600 hover:underline dark:text-blue-400">
+            <Link href="/personas/" className="text-blue-600 hover:underline dark:text-blue-400">
               משתתפים
-            </a>
+            </Link>
             .
           </p>
         ) : (
@@ -345,9 +337,9 @@ export default function NewMeetingPage() {
       )}
       {missingProviders.length > 0 && (
         <p className="-mt-4 text-sm">
-          <a href="/settings" className="text-blue-600 hover:underline dark:text-blue-400">
+          <Link href="/settings/" className="text-blue-600 hover:underline dark:text-blue-400">
             מעבר להגדרות כדי להזין מפתח API
-          </a>
+          </Link>
         </p>
       )}
 
