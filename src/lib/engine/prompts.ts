@@ -1,12 +1,16 @@
 // Virmeet — Hebrew prompt builders for the meeting engine (spec §4).
 //
-// Caching note: for every persona, `system` is always built as exactly
-// [orgBlock, personaPrompt, personaFilesBlock] and none of those three change
-// during a meeting run — only the `messages` (user turn) content changes
-// between prep/opening/discussion calls. That stability is what lets
-// prompt caching (cache_control on the last system block) actually hit across
-// a persona's repeated calls in the same meeting. Do not fold per-phase or
-// per-round content into the system blocks.
+// Caching note: system blocks are ordered stable-and-shared-first —
+// [orgBlock, sharedFilesBlock, personaPrompt, personaFilesBlock] for personas,
+// [orgBlock, sharedFilesBlock, facilitatorPrompt] for the facilitator — and
+// none of those change during a meeting run; only `messages` (the user turn)
+// changes between prep/opening/discussion calls. That stability is what lets
+// prompt caching hit across every call of a meeting, persona and facilitator
+// alike, since [orgBlock, sharedFilesBlock] is now an identical prefix for
+// both. `sharedFilesBlock` carries its own cache breakpoint (see
+// llm-types.ts#SystemBlock) so the shared files are cached once instead of
+// once per persona. Do not fold per-phase or per-round content into the
+// system blocks.
 
 import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { SystemBlock } from '../llm-types';
@@ -51,10 +55,10 @@ ${org.constraints}
 - אורך התשובה חייב לעמוד בהנחיה שתינתן לך בכל שלב.`;
 }
 
-/** Renders a persona's private background files as prompt text (may be empty). */
-function buildFilesBlock(files: Persona['files'] | Meeting['files']): string {
+/** Renders a set of background files as prompt text under `heading` (may be empty). */
+function buildFilesBlock(files: Persona['files'] | Meeting['files'], heading: string): string {
   if (files.length === 0) {
-    return '# קבצי רקע\n\nאין קבצי רקע מצורפים.';
+    return `${heading}\n\nאין קבצי רקע מצורפים.`;
   }
   const parts = files.map((f) => {
     const body = f.extractionError
@@ -62,15 +66,19 @@ function buildFilesBlock(files: Persona['files'] | Meeting['files']): string {
       : f.extractedText || '[הקובץ ריק]';
     return `### ${f.name}\n${body}`;
   });
-  return `# קבצי רקע\n\n${parts.join('\n\n')}`;
+  return `${heading}\n\n${parts.join('\n\n')}`;
 }
 
-/** [orgBlock, personaPrompt, personaFilesBlock] — stable for the whole meeting, cache_control on the last block. */
-export function buildPersonaSystemBlocks(org: OrgSettings, persona: Persona): SystemBlock[] {
+const SHARED_FILES_HEADING = '# קבצי רקע משותפים לכל משתתפי הפגישה';
+const PRIVATE_FILES_HEADING = '# קבצי רקע פרטיים שלך (אף אחד אחר לא רואה אותם)';
+
+/** [orgBlock, sharedFilesBlock, personaPrompt, personaFilesBlock] — stable for the whole meeting; sharedFilesBlock carries its own cache breakpoint. */
+export function buildPersonaSystemBlocks(org: OrgSettings, persona: Persona, meeting: Meeting): SystemBlock[] {
   return [
     { type: 'text', text: buildOrgBlock(org) },
+    { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING), cacheBreakpoint: true },
     { type: 'text', text: persona.prompt },
-    { type: 'text', text: buildFilesBlock(persona.files) },
+    { type: 'text', text: buildFilesBlock(persona.files, PRIVATE_FILES_HEADING) },
   ];
 }
 
@@ -79,10 +87,11 @@ const FACILITATOR_ROLE_PROMPT = `אתה המנחה (facilitator) של הפגיש
 אל תמציא הסכמה שלא הייתה, ואל תטשטש מחלוקת אמיתית כדי שהפלט ייראה "נקי" יותר.
 כשמידע חסר או לא נאמר במפורש בדיון, סמן זאת ככזה — אל תשלים אותו כעובדה.`;
 
-/** [orgBlock, facilitatorRolePrompt] — stable across opening/convergence/extraction for cache hits. */
-export function buildFacilitatorSystemBlocks(org: OrgSettings): SystemBlock[] {
+/** [orgBlock, sharedFilesBlock, facilitatorRolePrompt] — stable across opening/convergence/extraction; shares the [orgBlock, sharedFilesBlock] prefix with persona calls for cache hits. */
+export function buildFacilitatorSystemBlocks(org: OrgSettings, meeting: Meeting): SystemBlock[] {
   return [
     { type: 'text', text: buildOrgBlock(org) },
+    { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING), cacheBreakpoint: true },
     { type: 'text', text: FACILITATOR_ROLE_PROMPT },
   ];
 }
@@ -102,10 +111,7 @@ function meetingHeaderBlock(meeting: Meeting, meetingTypes: MeetingType[]): stri
 ${meetingTypesBlock(meetingTypes)}
 
 ## מה רוצים להשיג / מה בונים
-${meeting.objective}
-
-## קבצי רקע משותפים לכל המשתתפים
-${buildFilesBlock(meeting.files)}`;
+${meeting.objective}`;
 }
 
 function formatTranscript(transcript: TranscriptEntry[]): string {

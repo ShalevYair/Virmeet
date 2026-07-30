@@ -176,7 +176,7 @@ export async function runMeeting(
       try {
         const result = await deps.callModel({
           model: persona.model,
-          system: prompts.buildPersonaSystemBlocks(org, persona),
+          system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
           messages: [{ role: 'user', content: prompts.buildPrepUserMessage(meeting, meetingTypes) }],
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
@@ -244,7 +244,7 @@ export async function runMeeting(
     try {
       const result = await deps.callModel({
         model: facilitatorModel,
-        system: prompts.buildFacilitatorSystemBlocks(org),
+        system: prompts.buildFacilitatorSystemBlocks(org, meeting),
         messages: [
           {
             role: 'user',
@@ -317,7 +317,7 @@ export async function runMeeting(
       try {
         const result = await deps.callModel({
           model: persona.model,
-          system: prompts.buildPersonaSystemBlocks(org, persona),
+          system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
           messages: [
             {
               role: 'user',
@@ -375,7 +375,7 @@ export async function runMeeting(
     try {
       const result = await deps.callModel({
         model: facilitatorModel,
-        system: prompts.buildFacilitatorSystemBlocks(org),
+        system: prompts.buildFacilitatorSystemBlocks(org, meeting),
         messages: [
           { role: 'user', content: prompts.buildConvergenceUserMessage(meeting, meetingTypes, transcript) },
         ],
@@ -415,7 +415,7 @@ export async function runMeeting(
     recordApiCall();
     const result = await deps.callModel({
       model: facilitatorModel,
-      system: prompts.buildFacilitatorSystemBlocks(org),
+      system: prompts.buildFacilitatorSystemBlocks(org, meeting),
       messages: [
         {
           role: 'user',
