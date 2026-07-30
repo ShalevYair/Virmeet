@@ -113,15 +113,22 @@ export async function callModel(opts: CallModelOptions): Promise<CallModelResult
       const candidate = response.candidates?.[0];
       const finishReason = candidate?.finishReason;
       if (promptBlockReason || (finishReason && BLOCKED_FINISH_REASONS.has(finishReason))) {
-        return { text: '', webSearches: [], usage: usageFrom(response.usageMetadata), refused: true };
+        return { text: '', webSearches: [], usage: usageFrom(response.usageMetadata), refused: true, truncated: false };
       }
 
       const webSearches = (candidate?.groundingMetadata?.webSearchQueries ?? []).map((query) => ({ query }));
+      const text = response.text ?? '';
+      // An empty response that wasn't blocked is its own failure mode: thinking
+      // can consume the entire token budget before any output text is produced,
+      // and finishReason isn't guaranteed to say MAX_TOKENS when that happens —
+      // treat it as truncated too so the caller never tries to JSON.parse('').
+      const truncated = finishReason === 'MAX_TOKENS' || text === '';
       return {
-        text: response.text ?? '',
+        text,
         webSearches,
         usage: usageFrom(response.usageMetadata),
         refused: false,
+        truncated,
       };
     } catch (err) {
       if (attempt >= RETRY_DELAYS_MS.length || !isRetryableError(err)) {

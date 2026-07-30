@@ -91,6 +91,7 @@ function extractResult(message: Anthropic.Message): CallModelResult {
       webSearches: [],
       usage: usageFrom(message.usage),
       refused: true,
+      truncated: false,
     };
   }
 
@@ -106,7 +107,13 @@ function extractResult(message: Anthropic.Message): CallModelResult {
     }
   }
 
-  return { text, webSearches, usage: usageFrom(message.usage), refused: false };
+  return {
+    text,
+    webSearches,
+    usage: usageFrom(message.usage),
+    refused: false,
+    truncated: message.stop_reason === 'max_tokens',
+  };
 }
 
 function usageFrom(usage: Anthropic.Usage): CallModelUsage {

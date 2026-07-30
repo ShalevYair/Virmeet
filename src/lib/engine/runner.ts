@@ -38,6 +38,13 @@ const defaultDeps: RunMeetingDeps = {
 };
 
 const REGULAR_MAX_TOKENS = 8000;
+// The extraction call is the only one that must emit the entire
+// EXTRACTION_SCHEMA in one response, and it runs at effort:'high' — where
+// thinking tokens come out of the same budget. A truncation here loses the
+// whole meeting's output, so it gets its own, larger budget. The value is
+// deliberately above anthropic.ts#STREAMING_THRESHOLD so the Anthropic path
+// switches to streaming automatically.
+const EXTRACTION_MAX_TOKENS = 20000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -250,6 +257,11 @@ export async function runMeeting(
       continue;
     }
 
+    if (result.truncated) {
+      await emitEntry(makeEntry('prep', 'system', 'מערכת', prompts.personaTruncatedInPrepLine(persona.name)));
+      continue;
+    }
+
     let parsed: PrepOutput;
     try {
       parsed = JSON.parse(result.text) as PrepOutput;
@@ -305,6 +317,12 @@ export async function runMeeting(
         await emitEntry(
           makeEntry('opening', 'system', 'מערכת', 'המנחה סירב לספק מסגור לפגישה. ממשיכים עם מסגור בסיסי.')
         );
+      } else if (result.truncated) {
+        opening = {
+          framing: 'תשובת המנחה בשלב הפתיחה נקטעה בשל מגבלת אורך — יש להתייחס לתמליל ההכנה של המשתתפים בלבד.',
+          conflicts: [],
+        };
+        await emitEntry(makeEntry('opening', 'system', 'מערכת', prompts.facilitatorTruncatedInOpeningLine()));
       } else {
         opening = JSON.parse(result.text) as OpeningOutput;
         const conflictsText = opening.conflicts
@@ -389,11 +407,17 @@ export async function runMeeting(
         }
 
         await emitEntry(
-          makeEntry('discussion', persona.id, persona.name, result.text, {
-            round,
-            webSearches: result.webSearches.length ? result.webSearches : undefined,
-            usage: result.usage,
-          })
+          makeEntry(
+            'discussion',
+            persona.id,
+            persona.name,
+            result.truncated ? `${result.text}${prompts.discussionTruncatedSuffix()}` : result.text,
+            {
+              round,
+              webSearches: result.webSearches.length ? result.webSearches : undefined,
+              usage: result.usage,
+            }
+          )
         );
       } catch (err) {
         budget.record(persona.id);
@@ -465,7 +489,7 @@ export async function runMeeting(
           content: prompts.buildExtractionUserMessage(meeting, meetingTypes, participants, transcript, convergenceSummary),
         },
       ],
-      maxTokens: REGULAR_MAX_TOKENS,
+      maxTokens: EXTRACTION_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
       apiKey: apiKeyFor(facilitatorModel),
@@ -474,6 +498,9 @@ export async function runMeeting(
 
     if (result.refused) {
       throw new Error('המנחה סירב לספק את חילוץ המשימות והתוצאות של הפגישה.');
+    }
+    if (result.truncated) {
+      throw new Error(prompts.extractionTruncatedError());
     }
 
     const raw = JSON.parse(result.text) as ExtractionModelOutput;
