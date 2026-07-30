@@ -159,7 +159,36 @@
    - `discussion` — כן פלוט את התמליל, אבל הוסף לסוף הטקסט
      `"\n\n[הערת מערכת: התגובה נקטעה בשל מגבלת אורך]"`. הקורא חייב לדעת.
    - `extraction` — זרוק שגיאה עברית ברורה במקום להשאיר את `JSON.parse` להיכשל.
-   - `EXTRACTION_MAX_TOKENS` נפרד לקריאת החילוץ בלבד (ראה החלטה פתוחה 6.2).
+
+### 3.1 העלאת תקציב הטוקנים לשלב החילוץ — **הוחלט, בצע**
+
+שאר הקריאות נשארות על `REGULAR_MAX_TOKENS = 8000`. קריאת ה-`extraction` בלבד עוברת
+לקבוע חדש:
+
+```ts
+// The extraction call is the only one that must emit the entire
+// EXTRACTION_SCHEMA in one response, and it runs at effort:'high' — where
+// thinking tokens come out of the same budget. A truncation here loses the
+// whole meeting's output, so it gets its own, larger budget. The value is
+// deliberately above anthropic.ts#STREAMING_THRESHOLD so the Anthropic path
+// switches to streaming automatically.
+const EXTRACTION_MAX_TOKENS = 20000;
+```
+
+**הנימוק:** זהו השלב היחיד שכישלון בו מאבד את כל תוצר הפגישה — התמליל נשמר, אבל
+המשימות, ההחלטות והשאלות הפתוחות הולכות לאיבוד. ההתייקרות חלה על קריאה אחת בלבד
+מתוך ~15 בפגישה טיפוסית, ומשולמת רק על טוקנים שנוצרו בפועל.
+
+⚠️ **שתי נקודות לאמת בזמן המימוש:**
+1. **Anthropic** — 20000 חוצה את `STREAMING_THRESHOLD` (16000, `anthropic.ts:29`) ולכן
+   `callModel` יעבור אוטומטית ל-`messages.stream(...).finalMessage()`. זהו מסלול שלא
+   נבדק עד היום בפרויקט. ודא שהוא מחזיר `stop_reason` תקין — סעיף 3 כולו נשען על כך.
+2. **Gemini** — `gemini.ts` **לא מממש streaming בכלל**; הוא תמיד קורא ל-
+   `generateContent`. שם 20000 רק מעלה את `maxOutputTokens`. ודא שהערך תקף למודל
+   המנחה (`gemini-3.1-pro-preview`) ושאין timeout בצד הדפדפן על תשובה ארוכה.
+
+אם מתברר ש-20000 אינו תקף לאחד הספקים — בחר את הערך התקף הגבוה ביותר, ועדכן את
+ההערה בקוד כך שתשקף את הסיבה האמיתית לבחירה.
 
 ⚠️ **לאמת מול התיעוד לפני מימוש, לא מהזיכרון:** המחרוזת המדויקת של `finishReason`
 ב-`@google/genai` v2 (enum או literal?), ושמסלול ה-streaming של Anthropic
@@ -275,12 +304,7 @@
    אפשרויות: (א) לחסום; (ב) לאפס `transcript`+`usage` בהרצה חוזרת; (ג) להשאיר.
    **המלצה: (ב).**
 
-2. **תקציב הטוקנים ל-extraction** (סעיף 3). העלאה מ-8000 מייקרת ומאטה כל פגישה, מול
-   האפשרות להשאיר ורק להיכשל בבירור. **המלצה: להעלות** — כישלון בשלב הזה מאבד את כל
-   תוצר הפגישה. אם מעלים מעל 16000, Anthropic יעבור ל-streaming אוטומטית
-   (`anthropic.ts:29`); ודא שזה נבדק.
-
-3. **איפה מבחן הייחוס חי** (סעיף 6.2). שתי אפשרויות:
+2. **איפה מבחן הייחוס חי** (סעיף 6.2). שתי אפשרויות:
    (א) **בתוך האפליקציה** — כפתור במסך פגישה שהושלמה, מריץ בדפדפן עם המפתח הקיים
    ומציג דוח. מתאים לארכיטקטורה, אבל מוסיף משקל ל-bundle של המוצר;
    (ב) **מבוסס ייצוא** — `downloadMeetingJson` כבר קיים (`export.ts:138`), אז סקריפט
