@@ -34,6 +34,29 @@ function isRetryableError(err: unknown): boolean {
   return false;
 }
 
+export type TestApiKeyResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * Validates a Gemini API key with the cheapest possible real request —
+ * listing models, which needs authentication but performs no generation and
+ * costs no tokens. Never throws.
+ */
+export async function testApiKey(apiKey: string): Promise<TestApiKeyResult> {
+  try {
+    const ai = getClient(apiKey);
+    await ai.models.list({ config: { pageSize: 1 } });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof GeminiApiError && (err.status === 400 || err.status === 401 || err.status === 403)) {
+      return { ok: false, message: `המפתח אינו תקין — Gemini דחה את בקשת האימות (${err.status}).` };
+    }
+    return {
+      ok: false,
+      message: `הבדיקה נכשלה: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 function buildSystemInstruction(system: SystemBlock[]): string {
   return system.map((block) => block.text).join('\n\n');
 }

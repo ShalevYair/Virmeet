@@ -2,7 +2,8 @@
 
 export const MODELS = {
   persona: 'claude-sonnet-5', // ברירת מחדל לפרסונה
-  facilitator: 'claude-opus-5', // מנחה + חילוץ משימות
+  facilitator: 'claude-opus-5', // מנחה + חילוץ משימות — כברירת מחדל, כשיש מפתח Anthropic
+  facilitatorGemini: 'gemini-3.1-pro-preview', // המנחה כשיש רק מפתח Gemini (ראו pickFacilitatorModel)
 } as const;
 
 export const ANTHROPIC_MODELS = ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'] as const;
@@ -17,6 +18,19 @@ export type ModelProvider = 'anthropic' | 'gemini';
 /** Which provider a given model id belongs to — decides which API key/client a call uses. */
 export function getModelProvider(model: string): ModelProvider {
   return (GEMINI_MODELS as readonly string[]).includes(model) ? 'gemini' : 'anthropic';
+}
+
+/**
+ * The facilitator (opening/convergence/extraction phases) needs *some* model,
+ * but doesn't have to be Anthropic specifically — a user who only has a
+ * Gemini key should still be able to run a full meeting. Prefer Anthropic
+ * when that key is available (its structured-output/refusal handling is the
+ * facilitator's primary target); fall back to Gemini otherwise.
+ */
+export function pickFacilitatorModel(apiKeys: { anthropic?: string; gemini?: string }): string {
+  if (apiKeys.anthropic) return MODELS.facilitator;
+  if (apiKeys.gemini) return MODELS.facilitatorGemini;
+  return MODELS.facilitator;
 }
 
 export interface AttachedFile {

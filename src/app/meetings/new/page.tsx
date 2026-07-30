@@ -62,12 +62,13 @@ export default function NewMeetingPage() {
 
   const activePersonas = useMemo(() => (personas ?? []).filter((p) => p.isActive), [personas]);
 
-  // The facilitator always runs on Anthropic; add each selected participant's
-  // provider so the banner below only warns about providers this meeting
-  // actually needs. There's no server key anymore — only what's in this
+  // The facilitator can run on either provider (whichever key is available —
+  // see pickFacilitatorModel), so it doesn't add its own hard requirement
+  // here. We only warn about providers this meeting's *participants*
+  // actually need. There's no server key anymore — only what's in this
   // browser's localStorage (see api-key.ts).
   const missingProviders = useMemo(() => {
-    const needed = new Set<ModelProvider>(['anthropic']);
+    const needed = new Set<ModelProvider>();
     for (const p of activePersonas) {
       if (participantIds.includes(p.id)) needed.add(getModelProvider(p.model));
     }

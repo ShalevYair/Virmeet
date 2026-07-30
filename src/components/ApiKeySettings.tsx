@@ -13,7 +13,8 @@ import {
   maskApiKey,
   setStoredApiKey,
 } from '@/lib/api-key';
-import { Button, Card, Field, inputClasses } from '@/components/ui';
+import { testApiKey, type TestApiKeyResult } from '@/lib/api-key-test';
+import { Button, Card, Field, Spinner, inputClasses } from '@/components/ui';
 
 interface ProviderConfig {
   provider: ApiKeyProvider;
@@ -46,6 +47,8 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
   const [visible, setVisible] = useState(false);
   const [saved, setSaved] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestApiKeyResult | null>(null);
 
   useEffect(() => {
     setStoredKeyState(getStoredApiKey(config.provider));
@@ -53,6 +56,9 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
 
   const trimmedDraft = draft.trim();
   const shapeWarning = trimmedDraft.length > 0 && !config.looksValid(trimmedDraft);
+  // Test whatever the user is actively looking at: the draft if they typed
+  // one, otherwise the already-saved key.
+  const keyToTest = trimmedDraft || storedKey || '';
 
   function handleSave() {
     if (!trimmedDraft) return;
@@ -62,6 +68,7 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
     setVisible(false);
     setCleared(false);
     setSaved(true);
+    setTestResult(null);
   }
 
   function handleClear() {
@@ -69,6 +76,21 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
     setStoredKeyState(null);
     setSaved(false);
     setCleared(true);
+    setTestResult(null);
+  }
+
+  async function handleTest() {
+    if (!keyToTest) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testApiKey(config.provider, keyToTest);
+      setTestResult(result);
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : 'הבדיקה נכשלה.' });
+    } finally {
+      setTesting(false);
+    }
   }
 
   return (
@@ -78,7 +100,7 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
         <p className="mt-1 text-sm text-black/60 dark:text-white/60">
           {storedKey
             ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש למודלים של ${config.label} מהמכשיר הזה.`
-            : `לא שמור מפתח בדפדפן זה. אם לשרת אין מפתח משלו, יש להזין מפתח כאן כדי להריץ פגישות עם מודלים של ${config.label}.`}
+            : `לא שמור מפתח בדפדפן זה. יש להזין מפתח כאן כדי להריץ פגישות עם מודלים של ${config.label}.`}
         </p>
       </div>
 
@@ -93,6 +115,7 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
               setDraft(e.target.value);
               setSaved(false);
               setCleared(false);
+              setTestResult(null);
             }}
             placeholder={config.placeholder}
             autoComplete="off"
@@ -112,6 +135,25 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
       <div className="flex items-center justify-end gap-3">
         {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">נשמר ✓</span>}
         {cleared && <span className="text-sm text-black/50 dark:text-white/50">המפתח נמחק</span>}
+        {testResult && (
+          <span
+            className={`text-sm ${
+              testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+            }`}
+          >
+            {testResult.ok ? 'המפתח תקין ✓' : testResult.message}
+          </span>
+        )}
+        <Button variant="secondary" onClick={handleTest} disabled={!keyToTest || testing}>
+          {testing ? (
+            <>
+              <Spinner className="h-4 w-4" />
+              בודק…
+            </>
+          ) : (
+            'בדוק תקינות'
+          )}
+        </Button>
         <Button variant="danger" onClick={handleClear} disabled={!storedKey}>
           מחק מפתח
         </Button>
