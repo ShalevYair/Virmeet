@@ -297,3 +297,20 @@ export function personaErrorLine(personaName: string, errorMessage: string): str
 export function personaRefusedLine(personaName: string): string {
   return `${personaName} סירב/ה לספק תגובה בשלב הזה. ממשיכים בפגישה.`;
 }
+
+export function personaTruncatedInPrepLine(personaName: string): string {
+  return `התשובה של ${personaName} נקטעה בשל מגבלת אורך ולכן לא נכללה בשלב ההכנה.`;
+}
+
+export function facilitatorTruncatedInOpeningLine(): string {
+  return 'תשובת המנחה בשלב הפתיחה נקטעה בשל מגבלת אורך. ממשיכים עם מסגור בסיסי.';
+}
+
+/** Appended to a discussion entry's text when the response was cut off — the reader must be able to tell a truncated statement from a complete one. */
+export function discussionTruncatedSuffix(): string {
+  return '\n\n[הערת מערכת: התגובה נקטעה בשל מגבלת אורך]';
+}
+
+export function extractionTruncatedError(): string {
+  return 'חילוץ תוצאות הפגישה נכשל: תשובת המנחה בשלב החילוץ נקטעה בשל מגבלת אורך (max_tokens), ולא ניתן היה לחלץ ממנה משימות ותוצאות.';
+}

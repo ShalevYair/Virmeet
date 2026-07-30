@@ -143,6 +143,7 @@ export function makeCallModelResult(overrides: Partial<CallModelResult> = {}): C
     webSearches: [],
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
     refused: false,
+    truncated: false,
     ...overrides,
   };
 }

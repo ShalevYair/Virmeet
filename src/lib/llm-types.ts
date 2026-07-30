@@ -46,4 +46,6 @@ export interface CallModelResult {
   webSearches: WebSearchQuery[];
   usage: CallModelUsage;
   refused: boolean;
+  /** True iff the response was cut off by the max_tokens limit — `text` is a partial response, not a complete one. Always false when `refused` is true. */
+  truncated: boolean;
 }
