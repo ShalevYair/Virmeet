@@ -12,6 +12,7 @@ import type {
   Persona,
   TranscriptEntry,
 } from './types';
+import { getStoredApiKey } from './api-key';
 
 export class ApiError extends Error {
   status: number;
@@ -68,6 +69,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 function json(body: unknown): string {
   return JSON.stringify(body);
 }
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+export const healthApi = {
+  get: () => request<{ serverKeyConfigured: boolean }>('/api/health'),
+};
 
 // ---------------------------------------------------------------------------
 // Personas
@@ -201,7 +210,15 @@ export interface RunMeetingHandlers {
 export async function runMeeting(id: string, handlers: RunMeetingHandlers): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`/api/meetings/${id}/run`, { method: 'POST', signal: handlers.signal });
+    // A personal key pasted into Settings — if present — travels only in this
+    // one header, only to our own /api/meetings/[id]/run endpoint. This is the
+    // single place that attaches it; nothing else in the client sends it.
+    const storedKey = getStoredApiKey();
+    res = await fetch(`/api/meetings/${id}/run`, {
+      method: 'POST',
+      signal: handlers.signal,
+      headers: storedKey ? { 'x-anthropic-api-key': storedKey } : undefined,
+    });
   } catch {
     handlers.onError?.('לא ניתן היה להתחיל את הפגישה — בדקו את החיבור לשרת.');
     return;

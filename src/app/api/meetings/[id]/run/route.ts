@@ -13,10 +13,14 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function POST(_req: Request, { params }: RouteContext) {
+export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
 
-  const apiKeyError = requireApiKey();
+  // Personal key pasted into Settings (client component) and sent only on
+  // this request — never logged, never persisted (see runMeeting/store).
+  const clientApiKey = req.headers.get('x-anthropic-api-key') || undefined;
+
+  const apiKeyError = requireApiKey(clientApiKey);
   if (apiKeyError) return apiKeyError;
 
   const meeting = await getMeeting(id);
@@ -46,7 +50,7 @@ export async function POST(_req: Request, { params }: RouteContext) {
       }
 
       try {
-        await runMeeting(id, send);
+        await runMeeting(id, send, {}, clientApiKey);
       } catch (err) {
         send({
           type: 'error',
