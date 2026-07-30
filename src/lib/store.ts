@@ -226,7 +226,7 @@ export async function deletePersona(id: string): Promise<boolean> {
 }
 
 /** Persist an updated files[] array on a persona (used by upload/delete file routes). */
-async function setPersonaFiles(id: string, files: AttachedFile[]): Promise<Persona | null> {
+export async function setPersonaFiles(id: string, files: AttachedFile[]): Promise<Persona | null> {
   return transact(PERSONAS_FILE, seedPersonas, (personas) => {
     const idx = personas.findIndex((p) => p.id === id);
     if (idx === -1) return { next: personas, result: null };
@@ -423,6 +423,11 @@ export async function updateMeeting(id: string, patch: Partial<Meeting>): Promis
   });
 }
 
+/** Persist an updated files[] array on a meeting's shared background files. */
+export async function setMeetingFiles(id: string, files: AttachedFile[]): Promise<Meeting | null> {
+  return updateMeeting(id, { files });
+}
+
 export async function deleteMeeting(id: string): Promise<boolean> {
   const filePath = meetingFilePath(id);
   if (!(await fileExists(filePath))) return false;
@@ -518,10 +523,8 @@ export async function deleteUpload(ownerId: string, fileId: string): Promise<voi
   await fs.rm(path.join(dir, match), { force: true });
 }
 
-// Exposed for routes that need to persist a persona's files[] array after
-// saveUpload()/deleteUpload() (which only handle the on-disk file itself).
+// Exposed for tests / advanced callers that need the raw path constants.
 export const _internal = {
-  setPersonaFiles,
   DATA_DIR,
   UPLOADS_DIR,
   MEETINGS_DIR,
