@@ -1,14 +1,46 @@
 'use client';
 
-// Virmeet — lets a user paste a personal Anthropic API key, stored only in
-// this browser's localStorage. Never sent anywhere except as the
-// x-anthropic-api-key header on POST /api/meetings/[id]/run (see api-client.ts).
+// Virmeet — lets a user paste a personal Anthropic and/or Gemini API key,
+// stored only in this browser's localStorage. Never sent anywhere except as
+// the x-anthropic-api-key / x-gemini-api-key header on
+// POST /api/meetings/[id]/run (see api-client.ts).
 
 import { useEffect, useState } from 'react';
-import { clearStoredApiKey, getStoredApiKey, maskApiKey, setStoredApiKey } from '@/lib/api-key';
+import {
+  ApiKeyProvider,
+  clearStoredApiKey,
+  getStoredApiKey,
+  maskApiKey,
+  setStoredApiKey,
+} from '@/lib/api-key';
 import { Button, Card, Field, inputClasses } from '@/components/ui';
 
-export function ApiKeySettings() {
+interface ProviderConfig {
+  provider: ApiKeyProvider;
+  label: string;
+  placeholder: string;
+  keyShapeHint: string;
+  looksValid: (key: string) => boolean;
+}
+
+const PROVIDERS: ProviderConfig[] = [
+  {
+    provider: 'anthropic',
+    label: 'Anthropic (Claude)',
+    placeholder: 'sk-ant-...',
+    keyShapeHint: 'מפתחות של Anthropic מתחילים ב-"sk-ant-"',
+    looksValid: (key) => key.startsWith('sk-ant-'),
+  },
+  {
+    provider: 'gemini',
+    label: 'Google (Gemini)',
+    placeholder: 'AIza...',
+    keyShapeHint: 'מפתחות של Gemini מתחילים בדרך כלל ב-"AIza"',
+    looksValid: (key) => key.startsWith('AIza'),
+  },
+];
+
+function ProviderKeyField({ config }: { config: ProviderConfig }) {
   const [storedKey, setStoredKeyState] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [visible, setVisible] = useState(false);
@@ -16,15 +48,15 @@ export function ApiKeySettings() {
   const [cleared, setCleared] = useState(false);
 
   useEffect(() => {
-    setStoredKeyState(getStoredApiKey());
-  }, []);
+    setStoredKeyState(getStoredApiKey(config.provider));
+  }, [config.provider]);
 
   const trimmedDraft = draft.trim();
-  const shapeWarning = trimmedDraft.length > 0 && !trimmedDraft.startsWith('sk-ant-');
+  const shapeWarning = trimmedDraft.length > 0 && !config.looksValid(trimmedDraft);
 
   function handleSave() {
     if (!trimmedDraft) return;
-    setStoredApiKey(trimmedDraft);
+    setStoredApiKey(config.provider, trimmedDraft);
     setStoredKeyState(trimmedDraft);
     setDraft('');
     setVisible(false);
@@ -33,24 +65,24 @@ export function ApiKeySettings() {
   }
 
   function handleClear() {
-    clearStoredApiKey();
+    clearStoredApiKey(config.provider);
     setStoredKeyState(null);
     setSaved(false);
     setCleared(true);
   }
 
   return (
-    <Card className="flex flex-col gap-4 p-5">
+    <div className="flex flex-col gap-3 border-t border-black/10 pt-4 first:border-t-0 first:pt-0 dark:border-white/10">
       <div>
-        <h2 className="text-sm font-semibold">מפתח API אישי של Anthropic</h2>
+        <h3 className="text-sm font-semibold">{config.label}</h3>
         <p className="mt-1 text-sm text-black/60 dark:text-white/60">
           {storedKey
-            ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש להרצת פגישות מהמכשיר הזה.`
-            : 'לא שמור מפתח בדפדפן זה. אם לשרת אין מפתח משלו, יש להזין מפתח כאן כדי להריץ פגישות.'}
+            ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש למודלים של ${config.label} מהמכשיר הזה.`
+            : `לא שמור מפתח בדפדפן זה. אם לשרת אין מפתח משלו, יש להזין מפתח כאן כדי להריץ פגישות עם מודלים של ${config.label}.`}
         </p>
       </div>
 
-      <Field label="הדבקת מפתח חדש" hint='מפתחות של Anthropic מתחילים ב-"sk-ant-"'>
+      <Field label="הדבקת מפתח חדש" hint={config.keyShapeHint}>
         <div className="flex gap-2">
           <input
             type={visible ? 'text' : 'password'}
@@ -62,7 +94,7 @@ export function ApiKeySettings() {
               setSaved(false);
               setCleared(false);
             }}
-            placeholder="sk-ant-..."
+            placeholder={config.placeholder}
             autoComplete="off"
             spellCheck={false}
           />
@@ -72,18 +104,12 @@ export function ApiKeySettings() {
         </div>
         {shapeWarning && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            שימו לב: המפתח לא נראה כמפתח Anthropic תקין (אמור להתחיל ב-&quot;sk-ant-&quot;). ניתן לשמור בכל זאת.
+            שימו לב: המפתח לא נראה כמפתח {config.label} תקין. ניתן לשמור בכל זאת.
           </p>
         )}
       </Field>
 
-      <p className="text-xs text-black/50 dark:text-white/50">
-        המפתח נשמר רק ב-localStorage של הדפדפן, על המכשיר הזה בלבד — הוא לא נשלח לשום מקום מלבד לשרת של
-        Virmeet, ורק כדי להריץ פגישה בפועל מול ה-API של Anthropic. כל סקריפט שרץ בדף יכול לקרוא אותו, ולכן
-        זה מתאים לשימוש אישי במכשיר שלכם ולא למחשב משותף.
-      </p>
-
-      <div className="flex items-center justify-end gap-3 border-t border-black/10 pt-4 dark:border-white/10">
+      <div className="flex items-center justify-end gap-3">
         {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">נשמר ✓</span>}
         {cleared && <span className="text-sm text-black/50 dark:text-white/50">המפתח נמחק</span>}
         <Button variant="danger" onClick={handleClear} disabled={!storedKey}>
@@ -93,6 +119,30 @@ export function ApiKeySettings() {
           שמור
         </Button>
       </div>
+    </div>
+  );
+}
+
+export function ApiKeySettings() {
+  return (
+    <Card className="flex flex-col gap-4 p-5">
+      <div>
+        <h2 className="text-sm font-semibold">מפתחות API אישיים</h2>
+        <p className="mt-1 text-sm text-black/60 dark:text-white/60">
+          בחרו מודל לכל פרסונה בעמוד המשתתפים, והזינו כאן את מפתח ה-API של הספק המתאים — Anthropic
+          עבור מודלי Claude, Google עבור מודלי Gemini. אין צורך להזין את שני המפתחות אם משתמשים בספק אחד בלבד.
+        </p>
+      </div>
+
+      {PROVIDERS.map((config) => (
+        <ProviderKeyField key={config.provider} config={config} />
+      ))}
+
+      <p className="border-t border-black/10 pt-4 text-xs text-black/50 dark:border-white/10 dark:text-white/50">
+        המפתחות נשמרים רק ב-localStorage של הדפדפן, על המכשיר הזה בלבד — הם לא נשלחים לשום מקום מלבד לשרת
+        של Virmeet, ורק כדי להריץ פגישה בפועל מול ה-API של הספק המתאים. כל סקריפט שרץ בדף יכול לקרוא אותם,
+        ולכן זה מתאים לשימוש אישי במכשיר שלכם ולא למחשב משותף.
+      </p>
     </Card>
   );
 }

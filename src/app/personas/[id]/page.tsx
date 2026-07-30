@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { use, useEffect, useState } from 'react';
 import { ApiError, personasApi } from '@/lib/api-client';
-import { AVAILABLE_MODELS, type Persona } from '@/lib/types';
+import { ANTHROPIC_MODELS, GEMINI_MODELS, type Persona } from '@/lib/types';
 import {
   Button,
   Card,
@@ -243,11 +243,20 @@ export default function PersonaEditorPage({ params }: { params: Promise<{ id: st
               value={persona.model}
               onChange={(e) => update('model', e.target.value)}
             >
-              {AVAILABLE_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
+              <optgroup label="Anthropic (Claude)">
+                {ANTHROPIC_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Google (Gemini)">
+                {GEMINI_MODELS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </Field>
           <Field label="מקסימום קריאות API לפגישה" hint="תקציב קריאות מודל לפרסונה זו, לפגישה אחת (1-20)">

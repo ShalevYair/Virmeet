@@ -14,8 +14,9 @@ import {
   Persona,
   TranscriptEntry,
 } from '../types';
-import { MODELS } from '../types';
-import { callModel as realCallModel, CallModelResult } from '../anthropic';
+import { getModelProvider, MODELS } from '../types';
+import { callModel as realCallModel } from '../llm';
+import { CallModelResult } from '../llm-types';
 import {
   getMeeting as storeGetMeeting,
   getOrgSettings as storeGetOrgSettings,
@@ -75,21 +76,27 @@ function makeEntry(
  * this promise settles.
  *
  * `overrideDeps` exists purely for tests: production callers should invoke
- * `runMeeting(meetingId, onEvent)` and let it use the real store + Anthropic
- * client.
+ * `runMeeting(meetingId, onEvent)` and let it use the real store + the
+ * Anthropic/Gemini clients (see ../llm.ts).
  *
- * `apiKey` — when the run route received one from the browser's
- * x-anthropic-api-key header — is forwarded to every model call below and
- * nowhere else: it is never added to `meeting`, `transcript`, or any
- * persisted patch, so it can't reach data/ or the exported transcript.
+ * `apiKeys` — personal keys the run route read off the browser's
+ * x-anthropic-api-key / x-gemini-api-key headers — are forwarded to every
+ * model call below (whichever key matches that call's model provider) and
+ * nowhere else: they are never added to `meeting`, `transcript`, or any
+ * persisted patch, so they can't reach data/ or the exported transcript.
  */
 export async function runMeeting(
   meetingId: string,
   onEvent: OnEvent,
   overrideDeps: Partial<RunMeetingDeps> = {},
-  apiKey?: string
+  apiKeys: { anthropic?: string; gemini?: string } = {}
 ): Promise<void> {
   const deps: RunMeetingDeps = { ...defaultDeps, ...overrideDeps };
+
+  /** The personal key (if any) matching `model`'s provider — Anthropic vs Gemini. */
+  function apiKeyFor(model: string): string | undefined {
+    return getModelProvider(model) === 'gemini' ? apiKeys.gemini : apiKeys.anthropic;
+  }
 
   const meeting = await deps.getMeeting(meetingId);
   if (!meeting) {
@@ -172,7 +179,7 @@ export async function runMeeting(
           effort: 'medium',
           jsonSchema: PREP_SCHEMA,
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
-          apiKey,
+          apiKey: apiKeyFor(persona.model),
         });
         return result;
       } finally {
@@ -244,7 +251,7 @@ export async function runMeeting(
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
-        apiKey,
+        apiKey: apiKeyFor(MODELS.facilitator),
       });
       recordTokens(result.usage);
 
@@ -325,7 +332,7 @@ export async function runMeeting(
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
-          apiKey,
+          apiKey: apiKeyFor(persona.model),
         });
         budget.record(persona.id);
         recordTokens(result.usage);
@@ -371,7 +378,7 @@ export async function runMeeting(
         ],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
-        apiKey,
+        apiKey: apiKeyFor(MODELS.facilitator),
       });
       recordTokens(result.usage);
 
@@ -415,7 +422,7 @@ export async function runMeeting(
       maxTokens: REGULAR_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
-      apiKey,
+      apiKey: apiKeyFor(MODELS.facilitator),
     });
     recordTokens(result.usage);
 

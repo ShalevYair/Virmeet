@@ -59,16 +59,27 @@ export function internalError(err: unknown): NextResponse {
 }
 
 /**
- * 500 with a clear Hebrew message when no Anthropic key is available at all —
- * neither ANTHROPIC_API_KEY on the server nor a client-supplied key (spec §5).
- * `clientKey` is the x-anthropic-api-key header the browser may have sent;
- * pass it through here rather than reading process.env directly so a
- * personal browser key can stand in for a missing server-wide one.
+ * 500 with a clear Hebrew message when NEITHER provider has a key available
+ * at all — not ANTHROPIC_API_KEY/GEMINI_API_KEY on the server, and not a
+ * client-supplied key for either. A meeting only actually needs the key for
+ * whichever provider its personas' models use, but that can't be known until
+ * the meeting's personas are loaded — so this is a coarse pre-check, and a
+ * persona/facilitator call missing its own provider's key still fails
+ * gracefully per-call inside runMeeting (see runner.ts).
+ * `clientKeys` are the x-anthropic-api-key / x-gemini-api-key headers the
+ * browser may have sent; passed through here rather than reading
+ * process.env directly so a personal browser key can stand in for a missing
+ * server-wide one.
  */
-export function requireApiKey(clientKey?: string | null): NextResponse | null {
-  if (!clientKey && !process.env.ANTHROPIC_API_KEY) {
+export function requireApiKey(
+  anthropicClientKey?: string | null,
+  geminiClientKey?: string | null
+): NextResponse | null {
+  const hasAnthropic = Boolean(anthropicClientKey) || Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasGemini = Boolean(geminiClientKey) || Boolean(process.env.GEMINI_API_KEY);
+  if (!hasAnthropic && !hasGemini) {
     return jsonError(
-      'מפתח ה-API של Anthropic לא הוגדר. אפשר להגדיר ANTHROPIC_API_KEY בקובץ .env.local בצד השרת, או להזין מפתח אישי במסך ההגדרות (Settings) בדפדפן.',
+      'לא הוגדר אף מפתח API — לא Anthropic ולא Gemini. אפשר להגדיר ANTHROPIC_API_KEY / GEMINI_API_KEY בקובץ .env.local בצד השרת, או להזין מפתח אישי במסך ההגדרות (Settings) בדפדפן.',
       500
     );
   }

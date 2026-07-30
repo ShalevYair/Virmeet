@@ -16,11 +16,12 @@ interface RouteContext {
 export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
 
-  // Personal key pasted into Settings (client component) and sent only on
+  // Personal keys pasted into Settings (client component) and sent only on
   // this request — never logged, never persisted (see runMeeting/store).
-  const clientApiKey = req.headers.get('x-anthropic-api-key') || undefined;
+  const anthropicKey = req.headers.get('x-anthropic-api-key') || undefined;
+  const geminiKey = req.headers.get('x-gemini-api-key') || undefined;
 
-  const apiKeyError = requireApiKey(clientApiKey);
+  const apiKeyError = requireApiKey(anthropicKey, geminiKey);
   if (apiKeyError) return apiKeyError;
 
   const meeting = await getMeeting(id);
@@ -50,7 +51,7 @@ export async function POST(req: Request, { params }: RouteContext) {
       }
 
       try {
-        await runMeeting(id, send, {}, clientApiKey);
+        await runMeeting(id, send, {}, { anthropic: anthropicKey, gemini: geminiKey });
       } catch (err) {
         send({
           type: 'error',

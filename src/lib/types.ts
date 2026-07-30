@@ -5,9 +5,19 @@ export const MODELS = {
   facilitator: 'claude-opus-5', // מנחה + חילוץ משימות
 } as const;
 
-export const AVAILABLE_MODELS = ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'] as const;
+export const ANTHROPIC_MODELS = ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'] as const;
+export const GEMINI_MODELS = ['gemini-3.1-pro-preview', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'] as const;
+
+export const AVAILABLE_MODELS = [...ANTHROPIC_MODELS, ...GEMINI_MODELS] as const;
 
 export type AvailableModel = (typeof AVAILABLE_MODELS)[number];
+
+export type ModelProvider = 'anthropic' | 'gemini';
+
+/** Which provider a given model id belongs to — decides which API key/client a call uses. */
+export function getModelProvider(model: string): ModelProvider {
+  return (GEMINI_MODELS as readonly string[]).includes(model) ? 'gemini' : 'anthropic';
+}
 
 export interface AttachedFile {
   id: string;

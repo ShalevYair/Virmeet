@@ -2,6 +2,7 @@
 // Server-only. Never import this from client components.
 
 import Anthropic from '@anthropic-ai/sdk';
+import type { CallModelOptions, CallModelResult, CallModelUsage, SystemBlock, WebSearchQuery } from './llm-types';
 
 let client: Anthropic | null = null;
 
@@ -28,47 +29,6 @@ export function getClient(explicitApiKey?: string): Anthropic {
     client = new Anthropic({ maxRetries: 0 });
   }
   return client;
-}
-
-export interface SystemBlock {
-  type: 'text';
-  text: string;
-}
-
-export type CallModelMessage = Anthropic.MessageParam;
-
-export interface WebSearchOptions {
-  maxUses: number;
-}
-
-export interface CallModelOptions {
-  model: string;
-  system: SystemBlock[];
-  messages: CallModelMessage[];
-  maxTokens: number;
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  webSearch?: WebSearchOptions;
-  /** JSON schema for structured output. Must set additionalProperties:false and required on every field. */
-  jsonSchema?: Record<string, unknown>;
-  /** Optional key sent by the browser for this run, preferred over ANTHROPIC_API_KEY. Never logged or persisted. */
-  apiKey?: string;
-}
-
-export interface CallModelUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-}
-
-export interface WebSearchQuery {
-  query: string;
-}
-
-export interface CallModelResult {
-  text: string;
-  webSearches: WebSearchQuery[];
-  usage: CallModelUsage;
-  refused: boolean;
 }
 
 const RETRY_DELAYS_MS = [2000, 4000, 8000];

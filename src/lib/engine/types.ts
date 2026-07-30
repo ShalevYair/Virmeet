@@ -3,7 +3,7 @@
 // depends on. Kept separate from src/lib/types.ts (the persisted data model).
 
 import { Meeting, MeetingPhase, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
-import { CallModelOptions, CallModelResult } from '../anthropic';
+import { CallModelOptions, CallModelResult } from '../llm-types';
 
 export type PhaseName = MeetingPhase;
 
@@ -18,8 +18,9 @@ export type OnEvent = (event: MeetingEvent) => void;
 
 /**
  * The one seam the engine calls through to reach the model. Production code
- * passes the real `callModel` from src/lib/anthropic.ts; tests inject a stub
- * so runMeeting() never has to hit the live API to be exercised.
+ * passes the real `callModel` from src/lib/llm.ts, which dispatches to
+ * Anthropic or Gemini by model id; tests inject a stub so runMeeting() never
+ * has to hit a live API to be exercised.
  */
 export type CallModelFn = (opts: CallModelOptions) => Promise<CallModelResult>;
 

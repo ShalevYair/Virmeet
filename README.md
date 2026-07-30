@@ -24,7 +24,7 @@
 
 ```bash
 npm install
-cp .env.example .env.local     # והזן ANTHROPIC_API_KEY
+cp .env.example .env.local     # והזן ANTHROPIC_API_KEY ו/או GEMINI_API_KEY
 npm run dev                    # http://localhost:3000
 ```
 
@@ -39,19 +39,27 @@ npm run build
 
 ---
 
-## מפתח ה-API של Anthropic
+## מפתחות ה-API של Anthropic ו-Gemini
 
-יש שתי דרכים להזין מפתח, ואפשר להשתמש בכל אחת מהן בנפרד. הדרך הראשונה היא
-`ANTHROPIC_API_KEY` בקובץ `.env.local`, כמו למעלה — זה מפתח שרת-כלל, שרץ בצד
-השרת ותקף לכל מי שמריץ פגישה מול המופע הזה. הדרך השנייה היא להדביק מפתח אישי
-במסך ההגדרות (`/settings`); הוא נשמר ב-`localStorage` של הדפדפן ונשלח לשרת רק
-בבקשת ההרצה עצמה (`POST /api/meetings/[id]/run`, כותרת `x-anthropic-api-key`),
-בלי לגעת בדיסק, בתמליל, או בלוגים. אם קיימים שני המפתחות, המפתח מהדפדפן גובר.
+הכלי תומך בשני ספקי מודלים: Anthropic (Claude) ו-Google (Gemini). לכל פרסונה
+נבחר מודל בעמוד המשתתפים (`/personas/[id]`) — המודל קובע איזה ספק ואיזה מפתח
+API ישמשו לקריאות שלה. המנחה (facilitator, אחראי על שלבי הפתיחה, ההתכנסות
+והחילוץ) תמיד רץ על מודל Anthropic.
+
+יש שתי דרכים להזין מפתח לכל ספק, ואפשר להשתמש בכל אחת מהן בנפרד. הדרך הראשונה
+היא `ANTHROPIC_API_KEY` ו/או `GEMINI_API_KEY` בקובץ `.env.local`, כמו למעלה —
+אלה מפתחות שרת-כלל, שרצים בצד השרת ותקפים לכל מי שמריץ פגישה מול המופע הזה.
+הדרך השנייה היא להדביק מפתח אישי לכל ספק במסך ההגדרות (`/settings`); כל מפתח
+נשמר בנפרד ב-`localStorage` של הדפדפן ונשלח לשרת רק בבקשת ההרצה עצמה
+(`POST /api/meetings/[id]/run`, כותרות `x-anthropic-api-key` ו-`x-gemini-api-key`),
+בלי לגעת בדיסק, בתמליל, או בלוגים. אם קיימים גם מפתח שרת וגם מפתח דפדפן לאותו
+ספק, מפתח הדפדפן גובר. אין צורך במפתח Gemini אם כל הפרסונות (והמנחה) רצות על
+מודלים של Anthropic בלבד, ולהפך.
 
 חשוב להבין את המשמעות של האופציה השנייה: `localStorage` נגיש לכל סקריפט שרץ
 בדף הזה, כך שהיא מתאימה למכשיר אישי שרק אתם משתמשים בו, ולא למופע חשוף לרשת או
-משותף בין כמה משתמשים — שם המפתח היחיד שאמור להיות מוגדר הוא `ANTHROPIC_API_KEY`
-בצד השרת.
+משותף בין כמה משתמשים — שם המפתחות היחידים שאמורים להיות מוגדרים הם
+`ANTHROPIC_API_KEY` ו-`GEMINI_API_KEY` בצד השרת.
 
 ---
 
@@ -100,7 +108,9 @@ src/
   components/            רכיבי UI משותפים
   lib/
     engine/              מכונת המצבים: prompts, schemas, budget, runner
-    anthropic.ts         עטיפה לקריאת מודל: caching, retry, חיפוש רשת, refusal
+    llm.ts               דיספצ'ר: בוחר בין anthropic.ts ל-gemini.ts לפי מודל
+    anthropic.ts         עטיפה לקריאת Claude: caching, retry, חיפוש רשת, refusal
+    gemini.ts            עטיפה לקריאת Gemini: אותו חוזה callModel(), thinking, grounding
     store.ts             אחסון קבצי JSON עם כתיבה אטומית ונעילה per-file
     extract.ts           חילוץ טקסט מקבצים
     seed.ts              נתוני ברירת מחדל
