@@ -80,4 +80,75 @@ describe('runMeeting cancellation', () => {
     expect(finalMeeting.transcript.length).toBeGreaterThan(0);
     expect(finalMeeting.transcript.some((e) => e.text.includes('בוטלה'))).toBe(true);
   });
+
+  it('forwards the run signal to every model call, so an in-flight request can actually be aborted', async () => {
+    const p1 = makePersona({ name: 'א' });
+    const p2 = makePersona({ name: 'ב' });
+    const meetingType = makeMeetingType();
+    const meeting = makeMeeting({
+      participantIds: [p1.id, p2.id],
+      meetingTypeIds: [meetingType.id],
+      discussionRounds: 1,
+      status: 'draft',
+    });
+
+    const controller = new AbortController();
+    const deps = makeDeps({ meeting, personas: [p1, p2], meetingTypes: [meetingType], org: makeOrg() });
+
+    const seenSignals: (AbortSignal | undefined)[] = [];
+    const callModel: CallModelFn = async (opts) => {
+      seenSignals.push(opts.signal);
+      if (opts.jsonSchema) {
+        const schema = opts.jsonSchema as { properties: Record<string, unknown> };
+        if ('understanding' in schema.properties) {
+          return jsonResult({ understanding: 'u', concerns: ['a'], questions: ['a'] });
+        }
+        return jsonResult({ framing: 'f', conflicts: [] });
+      }
+      return makeCallModelResult({ text: 'תגובה' });
+    };
+    deps.callModel = callModel;
+
+    await runMeeting(meeting.id, () => {}, deps, {}, controller.signal);
+
+    expect(seenSignals.length).toBeGreaterThan(0);
+    for (const signal of seenSignals) {
+      expect(signal).toBe(controller.signal);
+    }
+  });
+
+  it('cancelling mid-prep never writes a per-persona error line — the rejections are the cancellation, not a real failure', async () => {
+    const p1 = makePersona({ name: 'א' });
+    const p2 = makePersona({ name: 'ב' });
+    const meetingType = makeMeetingType();
+    const meeting = makeMeeting({
+      participantIds: [p1.id, p2.id],
+      meetingTypeIds: [meetingType.id],
+      discussionRounds: 1,
+      status: 'draft',
+    });
+
+    const controller = new AbortController();
+    const deps = makeDeps({ meeting, personas: [p1, p2], meetingTypes: [meetingType], org: makeOrg() });
+
+    // Both prep calls run concurrently (Promise.allSettled); abort as soon as
+    // the first one starts, so both reject with an AbortError-shaped
+    // rejection exactly like a real aborted fetch would.
+    let started = 0;
+    const callModel: CallModelFn = async () => {
+      started += 1;
+      if (started === 1) controller.abort();
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    };
+    deps.callModel = callModel;
+
+    const events: MeetingEvent[] = [];
+    await runMeeting(meeting.id, (e) => events.push(e), deps, {}, controller.signal);
+
+    expect(events.filter((e) => e.type === 'cancelled')).toHaveLength(1);
+    const finalMeeting = (await deps.getMeeting(meeting.id)) as Meeting;
+    expect(finalMeeting.status).toBe('cancelled');
+    expect(finalMeeting.transcript.some((e) => e.text.includes('אירעה שגיאה בקבלת תגובה'))).toBe(false);
+    expect(finalMeeting.transcript.some((e) => e.text.includes('בוטלה'))).toBe(true);
+  });
 });
