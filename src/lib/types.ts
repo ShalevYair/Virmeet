@@ -20,6 +20,11 @@ export function getModelProvider(model: string): ModelProvider {
   return (GEMINI_MODELS as readonly string[]).includes(model) ? 'gemini' : 'anthropic';
 }
 
+/** True iff `model` is one of the ids this app actually knows how to route (see AVAILABLE_MODELS). */
+export function isKnownModel(model: string): boolean {
+  return (AVAILABLE_MODELS as readonly string[]).includes(model);
+}
+
 /**
  * The facilitator (opening/convergence/extraction phases) needs *some* model,
  * but doesn't have to be Anthropic specifically — a user who only has a
