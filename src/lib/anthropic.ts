@@ -28,8 +28,20 @@ const RETRY_DELAYS_MS = [2000, 4000, 8000];
 // max_tokens above this must use streaming to avoid hitting HTTP timeouts.
 const STREAMING_THRESHOLD = 16000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Resolves after `ms`, or immediately once `signal` aborts — never makes a cancelled run wait out a full retry backoff. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -163,14 +175,14 @@ export async function callModel(opts: CallModelOptions): Promise<CallModelResult
   for (;;) {
     try {
       const message = useStreaming
-        ? await anthropic.messages.stream(params).finalMessage()
-        : await anthropic.messages.create(params);
+        ? await anthropic.messages.stream(params, { signal: opts.signal }).finalMessage()
+        : await anthropic.messages.create(params, { signal: opts.signal });
       return extractResult(message);
     } catch (err) {
       if (attempt >= RETRY_DELAYS_MS.length || !isRetryableError(err)) {
         throw err;
       }
-      await sleep(RETRY_DELAYS_MS[attempt]);
+      await sleep(RETRY_DELAYS_MS[attempt], opts.signal);
       attempt += 1;
     }
   }

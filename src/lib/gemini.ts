@@ -23,8 +23,20 @@ export function getClient(apiKey?: string): GoogleGenAI {
 
 const RETRY_DELAYS_MS = [2000, 4000, 8000];
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Resolves after `ms`, or immediately once `signal` aborts — never makes a cancelled run wait out a full retry backoff. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -105,6 +117,9 @@ export async function callModel(opts: CallModelOptions): Promise<CallModelResult
     // Search in the same request — this is not a blocked combination.
     config.tools = [{ googleSearch: {} }];
   }
+  if (opts.signal) {
+    config.abortSignal = opts.signal;
+  }
 
   const contents = opts.messages.map((m) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
@@ -141,7 +156,7 @@ export async function callModel(opts: CallModelOptions): Promise<CallModelResult
       if (attempt >= RETRY_DELAYS_MS.length || !isRetryableError(err)) {
         throw err;
       }
-      await sleep(RETRY_DELAYS_MS[attempt]);
+      await sleep(RETRY_DELAYS_MS[attempt], opts.signal);
       attempt += 1;
     }
   }
