@@ -11,6 +11,12 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    // Lets scripts/eval-distinctiveness.ts (spec P7) import leaf lib modules
+    // with an explicit .ts extension, so it also runs directly under plain
+    // `node` (Node 22's built-in type-stripping) without a bundler or a new
+    // ts-node/tsx dependency. Safe to enable repo-wide: it only *permits* the
+    // extra suffix, nothing forces existing extensionless imports to change.
+    "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "incremental": true,
     "plugins": [
