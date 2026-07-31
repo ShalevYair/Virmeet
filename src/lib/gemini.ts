@@ -73,6 +73,10 @@ function usageFrom(usage: { promptTokenCount?: number; candidatesTokenCount?: nu
     inputTokens: usage?.promptTokenCount ?? 0,
     outputTokens: usage?.candidatesTokenCount ?? 0,
     cacheReadTokens: usage?.cachedContentTokenCount ?? 0,
+    // Gemini's context caching is implicit — there's no separate cache-write
+    // request or token count to report, unlike Anthropic's explicit cache
+    // breakpoints. Always 0, intentionally, not a gap in this provider.
+    cacheWriteTokens: 0,
   };
 }
 

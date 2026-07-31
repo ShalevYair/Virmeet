@@ -59,6 +59,26 @@ describe('runMeeting — pre-flight API key check', () => {
     expect(message).not.toContain(gemini1.name);
   });
 
+  it('stops before any model call when a participant has an unrecognized model id', async () => {
+    const known = makePersona({ name: 'ארכיטקט תשתיות', model: 'claude-sonnet-5' });
+    const unknown = makePersona({ name: 'מומחה חיצוני', model: 'gemini-2.0-flash' });
+    const meeting = makeMeeting({ participantIds: [known.id, unknown.id], status: 'draft' });
+
+    getMeetingMock.mockResolvedValue(meeting);
+    listPersonasMock.mockResolvedValue([known, unknown]);
+    getStoredApiKeyMock.mockImplementation(() => 'ant-key');
+
+    const onError = vi.fn();
+    await runMeeting(meeting.id, { onError });
+
+    expect(engineRunMeetingMock).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    const message = onError.mock.calls[0][0] as string;
+    expect(message).toContain(unknown.name);
+    expect(message).toContain('gemini-2.0-flash');
+    expect(message).not.toContain(known.name);
+  });
+
   it('proceeds to the engine once every participant model matches an available key', async () => {
     const gemini1 = makePersona({ name: 'מומחה אבטחה', model: 'gemini-3.1-pro-preview' });
     const claude1 = makePersona({ name: 'ארכיטקט תשתיות', model: 'claude-sonnet-5' });
@@ -93,7 +113,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-      usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, apiCalls: 3 },
+      usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 3 },
     });
 
     getMeetingMock.mockResolvedValue(meeting);
@@ -105,7 +125,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
 
     expect(updateMeetingMock).toHaveBeenCalledWith(meeting.id, {
       transcript: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     });
     // The reset must land before the engine reads the meeting back, or the
     // fix is a no-op.
@@ -127,7 +147,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
 
     expect(updateMeetingMock).toHaveBeenCalledWith(meeting.id, {
       transcript: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     });
     expect(engineRunMeetingMock).toHaveBeenCalledTimes(1);
   });

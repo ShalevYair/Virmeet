@@ -5,7 +5,7 @@
 // exactly like they did against the old fetch()-based client.
 
 import type { AttachedFile, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
-import { getModelProvider } from './types';
+import { getModelProvider, isKnownModel } from './types';
 import * as store from './store';
 import type { MeetingSummary } from './store';
 import { runMeeting as engineRunMeeting } from './engine/runner';
@@ -356,6 +356,21 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
     .map((pid) => personaById.get(pid))
     .filter((p): p is (typeof allPersonas)[number] => p != null);
 
+  // Checked separately from (and before) the key check below: an unknown
+  // model id routes silently to Anthropic (getModelProvider's fallback), so
+  // folding this into blockedParticipants would surface the wrong message
+  // ("דרוש מפתח API שלא הוגדר") for a persona whose real problem is a model
+  // id this app doesn't know how to route at all — most likely a seed or
+  // JSON-imported persona (personas/edit's own <select> can't produce one).
+  const unknownModelParticipants = participants.filter((p) => !isKnownModel(p.model));
+  if (unknownModelParticipants.length > 0) {
+    const names = unknownModelParticipants.map((p) => `${p.name} (${p.model})`).join(', ');
+    handlers.onError?.(
+      `לא ניתן להתחיל את הפגישה: למשתתפים הבאים מוגדר מזהה מודל לא מוכר — ${names}. יש לבחור מודל תקין במסך עריכת המשתתף.`
+    );
+    return;
+  }
+
   const hasKeyFor = (model: string): boolean =>
     getModelProvider(model) === 'gemini' ? !!geminiKey : !!anthropicKey;
 
@@ -379,7 +394,7 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
   // no-op on a genuine first run.
   await store.updateMeeting(id, {
     transcript: [],
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
   });
 
   let aborted = false;

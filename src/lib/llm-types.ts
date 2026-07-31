@@ -35,6 +35,7 @@ export interface CallModelUsage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  cacheWriteTokens: number;
 }
 
 export interface WebSearchQuery {
