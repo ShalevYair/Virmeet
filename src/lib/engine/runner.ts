@@ -38,6 +38,13 @@ const defaultDeps: RunMeetingDeps = {
 };
 
 const REGULAR_MAX_TOKENS = 8000;
+// Extraction's output is a large structured MeetingResult (summary, decisions,
+// openQuestions, conflicts, risks, tasks with assumptions, modelAssumptions),
+// and thinking tokens count against max_tokens too — 8000 can be exhausted by
+// thinking alone before any JSON is written (A4 in WORKPLAN.md). This also
+// pushes the call past STREAMING_THRESHOLD in anthropic.ts, which is correct:
+// a non-streaming call with max_tokens this high risks an HTTP timeout.
+const EXTRACTION_MAX_TOKENS = 32000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -406,7 +413,7 @@ export async function runMeeting(
       messages: [
         userMessage(prompts.buildExtractionUserMessage(participants, transcript, convergenceSummary)),
       ],
-      maxTokens: REGULAR_MAX_TOKENS,
+      maxTokens: EXTRACTION_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
       apiKey,
@@ -415,6 +422,12 @@ export async function runMeeting(
 
     if (result.refused) {
       throw new Error('המנחה סירב לספק את חילוץ המשימות והתוצאות של הפגישה.');
+    }
+
+    if (result.stopReason === 'max_tokens') {
+      throw new Error(
+        'פלט החילוץ נקטע באמצע — הפגישה ארוכה מדי למגבלת הטוקנים הנוכחית.'
+      );
     }
 
     const raw = JSON.parse(result.text) as ExtractionModelOutput;

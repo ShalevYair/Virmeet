@@ -81,7 +81,7 @@ function usage(): CallModelUsage {
 }
 
 function okResult(text: string): CallModelResult {
-  return { text, webSearches: [], usage: usage(), refused: false };
+  return { text, webSearches: [], usage: usage(), refused: false, stopReason: 'end_turn' };
 }
 
 const PREP_JSON = JSON.stringify({
@@ -222,7 +222,7 @@ describe('runMeeting', () => {
 
     const callModel = async (opts: CallModelOptions): Promise<CallModelResult> => {
       if (opts.jsonSchema === PREP_SCHEMA && opts.model === 'model-a') {
-        return { text: '', webSearches: [], usage: usage(), refused: true };
+        return { text: '', webSearches: [], usage: usage(), refused: true, stopReason: 'refusal' };
       }
       return happyPathCallModel(b.name)(opts);
     };
@@ -287,6 +287,37 @@ describe('runMeeting', () => {
       (e) => e.speakerId === 'system' && e.text.includes('פרסונה א') && e.text.includes('תקציב')
     );
     expect(budgetMessages).toHaveLength(1);
+  });
+
+  it('a max_tokens-truncated extraction reports the truncation, not a JSON parse error', async () => {
+    const a = makePersona({ name: 'פרסונה א', model: 'model-a' });
+    const b = makePersona({ name: 'פרסונה ב', model: 'model-b' });
+    const mt = makeMeetingType();
+    const meeting = makeMeeting([a.id, b.id], [mt.id]);
+
+    let extractionMaxTokensSeen: number | undefined;
+    const callModel = async (opts: CallModelOptions): Promise<CallModelResult> => {
+      if (opts.jsonSchema === EXTRACTION_SCHEMA) {
+        extractionMaxTokensSeen = opts.maxTokens;
+        return {
+          text: '{"summary": "סיכום חלקי שנקטע באמצ',
+          webSearches: [],
+          usage: usage(),
+          refused: false,
+          stopReason: 'max_tokens',
+        };
+      }
+      return happyPathCallModel(a.name)(opts);
+    };
+
+    const { deps, getCurrent } = makeDeps(meeting, [a, b], [mt], callModel);
+    await run(deps, meeting.id);
+
+    const final = getCurrent();
+    expect(final.status).toBe('failed');
+    expect(final.error).toContain('נקטע');
+    expect(final.error).not.toContain('JSON');
+    expect(extractionMaxTokensSeen).toBe(32000);
   });
 
   it('an extraction failure marks the meeting failed but keeps the transcript', async () => {

@@ -69,6 +69,7 @@ export interface CallModelResult {
   webSearches: WebSearchQuery[];
   usage: CallModelUsage;
   refused: boolean;
+  stopReason: Anthropic.Message['stop_reason'];
 }
 
 const RETRY_DELAYS_MS = [2000, 4000, 8000];
@@ -138,6 +139,7 @@ function extractResult(message: Anthropic.Message): CallModelResult {
       webSearches: [],
       usage: usageFrom(message.usage),
       refused: true,
+      stopReason: message.stop_reason,
     };
   }
 
@@ -153,7 +155,7 @@ function extractResult(message: Anthropic.Message): CallModelResult {
     }
   }
 
-  return { text, webSearches, usage: usageFrom(message.usage), refused: false };
+  return { text, webSearches, usage: usageFrom(message.usage), refused: false, stopReason: message.stop_reason };
 }
 
 function usageFrom(usage: Anthropic.Usage): CallModelUsage {
