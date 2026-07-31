@@ -342,6 +342,7 @@ export type MeetingCreateInput = {
   participantIds: string[];
   files?: AttachedFile[];
   discussionRounds?: number;
+  discussionMode?: 'round-robin' | 'facilitated';
 };
 
 function meetingFilePath(id: string): string {
@@ -450,6 +451,7 @@ export async function createMeeting(input: MeetingCreateInput): Promise<Meeting>
     participantIds: input.participantIds,
     files: input.files ?? [],
     discussionRounds: input.discussionRounds ?? 2,
+    discussionMode: input.discussionMode ?? 'round-robin',
     status: 'draft' as MeetingStatus,
     transcript: [],
     result: null,

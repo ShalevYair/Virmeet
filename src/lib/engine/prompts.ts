@@ -212,11 +212,29 @@ ${formatConflicts(opening.conflicts)}
 ${formatTranscript(transcriptSoFar)}`;
 }
 
-/** The volatile part of a discussion turn — changes every round, so it stays out of the cached block above. */
-export function buildDiscussionInstructionBlock(persona: Persona, round: number, totalRounds: number): string {
+/**
+ * The volatile part of a discussion turn — changes every round, so it stays
+ * out of the cached block above. `focusQuestion` is set only in
+ * `discussionMode:'facilitated'` (spec §8): when present, it replaces the
+ * generic "זהו תורך לדבר" opening with the facilitator's specific question
+ * for this persona this round. Omitted (round-robin, the default), this
+ * function is byte-for-byte what it always was.
+ */
+export function buildDiscussionInstructionBlock(
+  persona: Persona,
+  round: number,
+  totalRounds: number,
+  focusQuestion?: string
+): string {
+  const openingLine = focusQuestion
+    ? `זהו תורך לדבר, כ${persona.role}. המנחה מבקש ממך להתמקד בשאלה הבאה, שקשורה
+  להתנגשות ספציפית שעלתה בדיון:\n\n"${focusQuestion}"\n\nענה עליה ישירות ובמפורש —
+  זו המשימה המרכזית שלך בתור הזה, לא רק עוד עמדה כללית.`
+    : `זהו תורך לדבר, כ${persona.role}.`;
+
   return `# המשימה שלך עכשיו (סבב ${round} מתוך ${totalRounds})
 
-זהו תורך לדבר, כ${persona.role}. הנחיות מחייבות:
+${openingLine} הנחיות מחייבות:
 - הגב **ישירות** למה שנאמר בפועל בתמליל למעלה — ציין מי אמר מה ולמה אתה מסכים,
   חולק, או רוצה להוסיף עליו. אל תחזור על העמדה שהצגת בשלב ההכנה כאילו זו הפעם
   הראשונה שאתה מדבר.
@@ -224,6 +242,55 @@ export function buildDiscussionInstructionBlock(persona: Persona, round: number,
   צריך לבדוק מול X"). זו תשובה טובה, לא כישלון.
 - אם ההתנגשויות שלמעלה נוגעות אליך — קח בהן עמדה, אל תתחמק.
 - אורך התשובה: 80-200 מילה, טקסט חופשי (לא JSON, בלי כותרות).`;
+}
+
+// ---------------------------------------------------------------------------
+// Stage 8 (ניסיוני) — round planning in discussionMode:'facilitated'
+// ---------------------------------------------------------------------------
+
+/**
+ * Asks the facilitator, at the start of a discussion round, which of the
+ * still-eligible participants should speak this round and what focused
+ * question each should answer — instead of every participant getting a
+ * fixed turn (spec §8). Shares the same stable header/framing/conflicts
+ * shape as `buildDiscussionContextBlock` but is not itself cached: it runs
+ * once per round, not once per persona, so there's no repeated-read benefit.
+ */
+export function buildRoundPlanUserMessage(
+  meeting: Meeting,
+  meetingTypes: MeetingType[],
+  opening: OpeningOutput,
+  transcriptSoFar: TranscriptEntry[],
+  eligibleNames: string[],
+  round: number,
+  totalRounds: number
+): string {
+  return `${meetingHeaderBlock(meeting, meetingTypes)}
+
+# מסגור הפגישה (מהמנחה)
+${opening.framing}
+
+# ההתנגשויות שזוהו
+${formatConflicts(opening.conflicts)}
+
+# מה נאמר עד כה
+${formatTranscript(transcriptSoFar)}
+
+# המשימה שלך עכשיו
+
+זהו תכנון סבב ${round} מתוך ${totalRounds} בשלב הדיון (מצב "דיון מונחה-מנחה",
+ניסיוני). מבין המשתתפים הזמינים להשתתף בסבב הזה:
+${eligibleNames.map((n) => `- ${n}`).join('\n')}
+
+בחר אילו מהם ידברו בסבב הזה — אינך חייב לבחור בכולם — ולכל אחד מהם נסח שאלה
+ממוקדת אחת, הקשורה **להתנגשות ספציפית** שזוהתה למעלה או שעלתה בפועל בדיון עד
+כה. אל תבחר משתתף בלי שאלה שבאמת דוחפת את הדיון קדימה — עדיף פחות דוברים עם
+שאלה חדה מהרבה דוברים שחוזרים על מה שכבר נאמר.`;
+}
+
+/** System line logged when the facilitator's round plan doesn't select this persona for the current round. */
+export function roundSkippedLine(personaName: string, round: number): string {
+  return `${personaName} לא נבחר/ה על ידי המנחה לדבר בסבב ${round} — המנחה בחר להתמקד בדוברים אחרים ביחס להתנגשויות הפתוחות בסבב הזה.`;
 }
 
 // ---------------------------------------------------------------------------

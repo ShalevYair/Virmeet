@@ -158,6 +158,7 @@ export type MeetingCreateInput = {
   objective: string;
   participantIds: string[];
   discussionRounds?: number;
+  discussionMode?: 'round-robin' | 'facilitated';
 };
 
 export const meetingsApi = {

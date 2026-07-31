@@ -101,6 +101,11 @@ function isDiscussionCallFor(opts: CallModelOptions, personaPrompt: string): boo
   return !opts.jsonSchema && opts.system[1]?.text === personaPrompt;
 }
 
+/** True for a facilitated-mode (P8) round-planning call — the only schema with a `speakers` field. */
+function isRoundPlanCall(opts: CallModelOptions): boolean {
+  return Array.isArray(opts.jsonSchema?.required) && (opts.jsonSchema!.required as string[]).includes('speakers');
+}
+
 function structuredOk(opts: CallModelOptions): CallModelResult {
   const payload = {
     understanding: 'u',
@@ -411,5 +416,143 @@ describe('runMeeting — extraction data hygiene (P4.1/P4.2 regression)', () => 
 
     expect(result!.modelAssumptions.some((a) => a.includes('שם לא מוכר') && a.includes('Alicia'))).toBe(true);
     expect(result!.modelAssumptions.some((a) => a.includes('task-does-not-exist'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P8 (ניסיוני) — discussionMode:'facilitated'
+// ---------------------------------------------------------------------------
+
+describe('runMeeting — discussionMode facilitated (P8, ניסיוני)', () => {
+  it('asks the facilitator for a per-round plan, skips personas it omits, and threads the focus question into the discussion call', async () => {
+    const personas = [makePersona('p1', 'Alice'), makePersona('p2', 'Bob')];
+    const meeting = makeMeeting('m1', ['p1', 'p2'], { discussionRounds: 2, discussionMode: 'facilitated' });
+    const { deps, getStored } = makeHarness(personas, meeting);
+
+    const focusQuestionsSeen: string[] = [];
+    let roundPlanCalls = 0;
+
+    await runMeeting(
+      'm1',
+      () => {},
+      {
+        ...deps,
+        callModel: async (opts) => {
+          if (isRoundPlanCall(opts)) {
+            roundPlanCalls += 1;
+            const content = opts.messages[0].content as string;
+            const round1 = content.includes('סבב 1 מתוך 2');
+            const speakers = round1
+              ? [{ name: 'Alice', focusQuestion: 'שאלה לסבב 1' }]
+              : [{ name: 'Bob', focusQuestion: 'שאלה לסבב 2' }];
+            return {
+              text: JSON.stringify({ speakers }),
+              webSearches: [],
+              usage: { inputTokens: 5, outputTokens: 5, cacheReadTokens: 0 },
+              refused: false,
+            };
+          }
+          if (isDiscussionCallFor(opts, 'prompt-of-p1') || isDiscussionCallFor(opts, 'prompt-of-p2')) {
+            const block = opts.messages[0].content;
+            if (Array.isArray(block)) {
+              const instructionText = (block[1] as { text: string }).text;
+              if (instructionText.includes('שאלה לסבב')) focusQuestionsSeen.push(instructionText);
+            }
+          }
+          return structuredOk(opts);
+        },
+      }
+    );
+
+    const finalMeeting = getStored();
+    expect(finalMeeting.status).toBe('completed');
+    // One planning call per round.
+    expect(roundPlanCalls).toBe(2);
+
+    // Round 1: only Alice speaks (per the plan); Bob is skipped with a Hebrew line naming him.
+    const round1AliceEntries = finalMeeting.transcript.filter(
+      (e) => e.speakerId === 'p1' && e.phase === 'discussion' && e.round === 1
+    );
+    expect(round1AliceEntries).toHaveLength(1);
+    const round1BobEntries = finalMeeting.transcript.filter(
+      (e) => e.speakerId === 'p2' && e.phase === 'discussion' && e.round === 1
+    );
+    expect(round1BobEntries).toHaveLength(0);
+    const round1BobSkip = finalMeeting.transcript.find(
+      (e) => e.speakerId === 'system' && e.round === 1 && e.text.includes('Bob') && e.text.includes('לא נבחר/ה')
+    );
+    expect(round1BobSkip).toBeDefined();
+
+    // Round 2: only Bob speaks; Alice is skipped.
+    const round2BobEntries = finalMeeting.transcript.filter(
+      (e) => e.speakerId === 'p2' && e.phase === 'discussion' && e.round === 2
+    );
+    expect(round2BobEntries).toHaveLength(1);
+    const round2AliceSkip = finalMeeting.transcript.find(
+      (e) => e.speakerId === 'system' && e.round === 2 && e.text.includes('Alice') && e.text.includes('לא נבחר/ה')
+    );
+    expect(round2AliceSkip).toBeDefined();
+
+    // The facilitator's focused question actually reached the discussion instruction block.
+    expect(focusQuestionsSeen.some((t) => t.includes('שאלה לסבב 1'))).toBe(true);
+    expect(focusQuestionsSeen.some((t) => t.includes('שאלה לסבב 2'))).toBe(true);
+  });
+
+  it('falls back to round-robin for a round when the planning call fails, instead of dropping the round', async () => {
+    const personas = [makePersona('p1', 'Alice'), makePersona('p2', 'Bob')];
+    const meeting = makeMeeting('m1', ['p1', 'p2'], { discussionRounds: 1, discussionMode: 'facilitated' });
+    const { deps, getStored } = makeHarness(personas, meeting);
+
+    await runMeeting(
+      'm1',
+      () => {},
+      {
+        ...deps,
+        callModel: async (opts) => {
+          if (isRoundPlanCall(opts)) throw new Error('planning call boom');
+          return structuredOk(opts);
+        },
+      }
+    );
+
+    const finalMeeting = getStored();
+    expect(finalMeeting.status).toBe('completed');
+    // Both personas still got a turn — no skip lines, no dropped round.
+    const discussionSpeakers = finalMeeting.transcript
+      .filter((e) => e.phase === 'discussion' && e.speakerId !== 'system')
+      .map((e) => e.speakerId);
+    expect(discussionSpeakers.sort()).toEqual(['p1', 'p2']);
+    const skipLines = finalMeeting.transcript.filter((e) => e.text.includes('לא נבחר/ה'));
+    expect(skipLines).toHaveLength(0);
+  });
+});
+
+describe('runMeeting — discussionMode round-robin unchanged (P8 regression)', () => {
+  it('produces the same call count and phases whether discussionMode is omitted or explicitly round-robin', async () => {
+    const personas = [makePersona('p1', 'Alice'), makePersona('p2', 'Bob')];
+
+    async function run(discussionMode?: 'round-robin' | 'facilitated') {
+      const meeting = makeMeeting('m1', ['p1', 'p2'], { discussionRounds: 1, discussionMode });
+      const { deps, getStored } = makeHarness(personas, meeting);
+      const phases: string[] = [];
+      await runMeeting(
+        'm1',
+        (evt) => {
+          if (evt.type === 'phase') phases.push(evt.phase);
+        },
+        { ...deps, callModel: async (opts) => structuredOk(opts) }
+      );
+      return { finalMeeting: getStored(), phases };
+    }
+
+    const omitted = await run(undefined);
+    const explicit = await run('round-robin');
+
+    expect(omitted.phases).toEqual(explicit.phases);
+    // 2 prep + 1 opening + 2 discussion (1 round, no planning calls) + 1 convergence + 1 extraction = 7
+    expect(omitted.finalMeeting.usage.apiCalls).toBe(7);
+    expect(explicit.finalMeeting.usage.apiCalls).toBe(7);
+    expect(omitted.finalMeeting.transcript.filter((e) => e.text.includes('לא נבחר/ה'))).toHaveLength(0);
+    expect(explicit.finalMeeting.transcript.filter((e) => e.text.includes('לא נבחר/ה'))).toHaveLength(0);
   });
 });

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDiscussionContextBlock,
+  buildDiscussionInstructionBlock,
   buildFacilitatorSystemBlocks,
   buildPersonaSystemBlocks,
+  roundSkippedLine,
 } from '../engine/prompts';
 import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 
@@ -145,5 +147,30 @@ describe('buildDiscussionContextBlock (spec P4.3 — cache-friendly prefix growt
     ];
     const block = buildDiscussionContextBlock(meeting, meetingTypes, { framing: 'f', conflicts: [] }, []);
     expect(block).not.toMatch(/סבב \d+ מתוך \d+/);
+  });
+});
+
+describe('buildDiscussionInstructionBlock (P8 — focused question is opt-in)', () => {
+  it('uses the generic "your turn to speak" opening when no focus question is given (round-robin, unchanged)', () => {
+    const persona = makePersona();
+    const block = buildDiscussionInstructionBlock(persona, 1, 2);
+    expect(block).toContain('זהו תורך לדבר');
+    expect(block).not.toContain('המנחה מבקש ממך');
+  });
+
+  it('replaces the opening with the facilitator\'s focused question when one is given (facilitated mode)', () => {
+    const persona = makePersona();
+    const block = buildDiscussionInstructionBlock(persona, 1, 2, 'האם התשתית תעמוד בעומס הזה?');
+    expect(block).toContain('המנחה מבקש ממך');
+    expect(block).toContain('האם התשתית תעמוד בעומס הזה?');
+  });
+});
+
+describe('roundSkippedLine (P8)', () => {
+  it('names the skipped persona and the round in Hebrew', () => {
+    const line = roundSkippedLine('בוב', 3);
+    expect(line).toContain('בוב');
+    expect(line).toContain('לא נבחר/ה');
+    expect(line).toContain('סבב 3');
   });
 });

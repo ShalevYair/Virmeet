@@ -28,6 +28,7 @@ export default function NewMeetingPage() {
   const [objective, setObjective] = useState('');
   const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [discussionRounds, setDiscussionRounds] = useState(2);
+  const [discussionMode, setDiscussionMode] = useState<'round-robin' | 'facilitated'>('round-robin');
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
 
@@ -106,6 +107,7 @@ export default function NewMeetingPage() {
         objective,
         participantIds,
         discussionRounds,
+        discussionMode,
       });
       for (const file of stagedFiles) {
         await meetingsApi.uploadFile(meeting.id, file);
@@ -333,6 +335,26 @@ export default function NewMeetingPage() {
             </button>
           ))}
         </div>
+      </Card>
+
+      <Card className="flex flex-col gap-2 p-5">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold">מצב דיון</h2>
+          <Badge tone="warning">ניסיוני</Badge>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={discussionMode === 'facilitated'}
+            onChange={(e) => setDiscussionMode(e.target.checked ? 'facilitated' : 'round-robin')}
+          />
+          דיון מונחה-מנחה — בכל סבב המנחה בוחר מי מדבר ועל איזו התנגשות ספציפית,
+          במקום שכל משתתף ידבר בכל סבב
+        </label>
+        <p className="text-xs text-black/50 dark:text-white/50">
+          ניסיוני: עדיין לא אומת שהמצב הזה משפר את איכות הפגישה. ברירת המחדל
+          (round-robin) מומלצת אלא אם רוצים להשוות בין השניים על אותה פגישה.
+        </p>
       </Card>
 
       {participantIds.length > 0 && (

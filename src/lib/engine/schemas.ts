@@ -168,6 +168,47 @@ export function buildExtractionSchema(participantNames: string[]) {
   } as const;
 }
 
+/**
+ * Stage 8 (ניסיוני) — `discussionMode:'facilitated'`. Called once at the start
+ * of each discussion round instead of letting every participant speak in
+ * fixed order: the facilitator picks a subset of the eligible speakers (named
+ * via enum, so it can't invent a participant) and writes one focused question
+ * per speaker, tied to a specific open conflict. Personas not returned here
+ * are skipped for the round (see `roundSkippedLine` in prompts.ts).
+ */
+export function buildRoundPlanSchema(eligibleNames: string[]) {
+  return {
+    type: 'object',
+    properties: {
+      speakers: {
+        type: 'array',
+        description: 'הדוברים שנבחרו לסבב הבא, כל אחד עם שאלה ממוקדת אחת.',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', enum: eligibleNames, description: 'שם המשתתף שנבחר לדבר.' },
+            focusQuestion: {
+              type: 'string',
+              description: 'שאלה ממוקדת אחת, הקשורה להתנגשות ספציפית, שהדובר נדרש לענות עליה.',
+            },
+          },
+          required: ['name', 'focusQuestion'],
+          additionalProperties: false,
+        },
+        minItems: 1,
+        maxItems: eligibleNames.length,
+      },
+    },
+    required: ['speakers'],
+    additionalProperties: false,
+  } as const;
+}
+
+/** Shape produced by the model for a facilitated-mode round plan. */
+export interface RoundPlanOutput {
+  speakers: { name: string; focusQuestion: string }[];
+}
+
 /** Shape produced by the model for extraction, before the runner assigns task ids and owner persona ids. */
 export interface ExtractionModelOutput {
   summary: string;

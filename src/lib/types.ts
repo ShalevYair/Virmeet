@@ -103,6 +103,10 @@ export interface Meeting {
   participantIds: string[]; // לפחות 2
   files: AttachedFile[]; // קבצי רקע משותפים
   discussionRounds: number; // 1-4, ברירת מחדל 2
+  // ניסיוני (שלב 8): 'facilitated' מוסיף תכנון-סבב על ידי המנחה במקום
+  // round-robin קבוע. אופציונלי לתאימות לאחור — פגישות ישנות ו-`undefined`
+  // מתנהגות כ-'round-robin' בדיוק כמו קודם.
+  discussionMode?: 'round-robin' | 'facilitated';
   status: MeetingStatus;
   transcript: TranscriptEntry[];
   result: MeetingResult | null;

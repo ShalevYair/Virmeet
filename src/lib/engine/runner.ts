@@ -26,7 +26,14 @@ import {
 } from '../store';
 import { CallBudget } from './budget';
 import * as prompts from './prompts';
-import { buildExtractionSchema, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
+import {
+  buildExtractionSchema,
+  buildRoundPlanSchema,
+  ExtractionModelOutput,
+  OPENING_SCHEMA,
+  PREP_SCHEMA,
+  RoundPlanOutput,
+} from './schemas';
 import { OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
 
 const defaultDeps: RunMeetingDeps = {
@@ -369,8 +376,63 @@ export async function runMeeting(
   if (await bailIfCancelled()) return;
   await checkBudgetCap();
   const totalRounds = meeting.discussionRounds;
+  // Stage 8 (ניסיוני) — default is unchanged round-robin; `'facilitated'`
+  // opts into a per-round plan from the facilitator (see below). Any meeting
+  // without the field (created before this stage) behaves exactly as before.
+  const discussionMode = meeting.discussionMode ?? 'round-robin';
 
   discussionLoop: for (let round = 1; round <= totalRounds; round++) {
+    // `roundPlan` maps persona name -> focused question for this round.
+    // `null` means "no plan" — every eligible persona speaks, exactly like
+    // round-robin — which is also the deliberate fallback when the planning
+    // call itself fails or is refused, so a facilitated-mode hiccup never
+    // silently drops the round.
+    let roundPlan: Map<string, string> | null = null;
+
+    if (discussionMode === 'facilitated') {
+      if (await bailIfCancelled()) return;
+      if (await checkBudgetCap()) break discussionLoop;
+      const eligibleNames = participants.filter((p) => budget.canCall(p.id)).map((p) => p.name);
+      if (eligibleNames.length > 0) {
+        recordApiCall();
+        try {
+          const result = await deps.callModel({
+            model: MODELS.facilitator,
+            system: prompts.buildFacilitatorSystemBlocks(org),
+            messages: [
+              {
+                role: 'user',
+                content: prompts.buildRoundPlanUserMessage(
+                  meeting,
+                  meetingTypes,
+                  opening,
+                  transcript,
+                  eligibleNames,
+                  round,
+                  totalRounds
+                ),
+              },
+            ],
+            maxTokens: REGULAR_MAX_TOKENS,
+            effort: 'medium',
+            jsonSchema: buildRoundPlanSchema(eligibleNames),
+            apiKey,
+            signal,
+          });
+          recordTokens(result.usage);
+          if (!result.refused) {
+            const parsed = JSON.parse(result.text) as RoundPlanOutput;
+            roundPlan = new Map(parsed.speakers.map((s) => [s.name, s.focusQuestion]));
+          }
+        } catch {
+          if (await bailIfCancelled()) return;
+          // Planning failure falls back to round-robin for this round rather
+          // than failing the meeting — the discussion itself is more
+          // important than the (experimental) optimization on top of it.
+        }
+      }
+    }
+
     for (const persona of participants) {
       if (await bailIfCancelled()) return;
       if (await checkBudgetCap()) break discussionLoop;
@@ -382,6 +444,17 @@ export async function runMeeting(
           );
         }
         continue;
+      }
+
+      let focusQuestion: string | undefined;
+      if (roundPlan) {
+        focusQuestion = roundPlan.get(persona.name);
+        if (focusQuestion === undefined) {
+          await emitEntry(
+            makeEntry('discussion', 'system', 'מערכת', prompts.roundSkippedLine(persona.name, round), { round })
+          );
+          continue;
+        }
       }
 
       recordApiCall();
@@ -402,7 +475,7 @@ export async function runMeeting(
                 },
                 {
                   type: 'text',
-                  text: prompts.buildDiscussionInstructionBlock(persona, round, totalRounds),
+                  text: prompts.buildDiscussionInstructionBlock(persona, round, totalRounds, focusQuestion),
                 },
               ],
             },

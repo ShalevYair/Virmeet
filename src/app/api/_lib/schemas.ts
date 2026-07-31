@@ -41,6 +41,7 @@ export const meetingCreateSchema = z.object({
   objective: z.string().min(1),
   participantIds: z.array(z.string().min(1)).min(2),
   discussionRounds: z.number().int().min(1).max(4).optional(),
+  discussionMode: z.enum(['round-robin', 'facilitated']).optional(),
 });
 
 // PATCH on a meeting is intentionally restricted to pre-run editable fields
