@@ -61,9 +61,30 @@ export interface CallModelUsage {
   cacheCreationTokens: number;
 }
 
+export interface WebSearchResultItem {
+  title: string;
+  url: string;
+}
+
 export interface WebSearchQuery {
   query: string;
+  /** Absent while a matching web_search_tool_result block never arrived (shouldn't normally happen). */
+  results?: WebSearchResultItem[];
+  /** Hebrew-translated failure reason — see WEB_SEARCH_ERROR_HE below (C3 in WORKPLAN.md). */
+  error?: string;
 }
+
+// The tool can fail with an HTTP 200 whose web_search_tool_result block content
+// is an error object instead of a results array — must be checked before
+// iterating (C3 in WORKPLAN.md). Codes per WebSearchToolResultErrorCode.
+const WEB_SEARCH_ERROR_HE: Record<string, string> = {
+  invalid_tool_input: 'קלט לא תקין לכלי החיפוש',
+  unavailable: 'כלי החיפוש אינו זמין כרגע',
+  max_uses_exceeded: 'מכסת החיפושים למשתתף זה מוצתה',
+  too_many_requests: 'יותר מדי בקשות חיפוש בזמן קצר',
+  query_too_long: 'שאילתת החיפוש ארוכה מדי',
+  request_too_large: 'הבקשה גדולה מדי',
+};
 
 export interface CallModelResult {
   text: string;
@@ -132,7 +153,9 @@ function buildParams(opts: CallModelOptions): Anthropic.MessageCreateParamsNonSt
   return params;
 }
 
-function extractResult(message: Anthropic.Message): CallModelResult {
+// Exported for unit testing only — production callers only ever reach this
+// through callModel(), never directly.
+export function extractResult(message: Anthropic.Message): CallModelResult {
   // Handle refusal BEFORE reading content (spec §0).
   if (message.stop_reason === 'refusal') {
     return {
@@ -145,16 +168,32 @@ function extractResult(message: Anthropic.Message): CallModelResult {
   }
 
   let text = '';
-  const webSearches: WebSearchQuery[] = [];
+  // Keyed by the server_tool_use block's id so the matching
+  // web_search_tool_result block (same tool_use_id) can attach its
+  // results/error to the right query, in the order queries were issued.
+  const searchesById = new Map<string, WebSearchQuery>();
+  const order: string[] = [];
   for (const block of message.content) {
     if (block.type === 'text') {
       text += block.text;
     } else if (block.type === 'server_tool_use' && block.name === 'web_search') {
       const input = block.input as Record<string, unknown> | undefined;
       const query = typeof input?.query === 'string' ? input.query : undefined;
-      if (query) webSearches.push({ query });
+      if (query) {
+        searchesById.set(block.id, { query });
+        order.push(block.id);
+      }
+    } else if (block.type === 'web_search_tool_result') {
+      const entry = searchesById.get(block.tool_use_id);
+      if (!entry) continue;
+      if (Array.isArray(block.content)) {
+        entry.results = block.content.map((r) => ({ title: r.title, url: r.url }));
+      } else {
+        entry.error = WEB_SEARCH_ERROR_HE[block.content.error_code] ?? 'חיפוש הרשת נכשל';
+      }
     }
   }
+  const webSearches = order.map((id) => searchesById.get(id)!);
 
   return { text, webSearches, usage: usageFrom(message.usage), refused: false, stopReason: message.stop_reason };
 }

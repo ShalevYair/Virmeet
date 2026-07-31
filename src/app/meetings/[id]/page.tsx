@@ -200,9 +200,7 @@ function TranscriptBubble({
           <Badge tone="neutral">{PHASE_LABEL[entry.phase]}</Badge>
           {typeof entry.round === 'number' && <Badge tone="neutral">סבב {entry.round}</Badge>}
           {entry.webSearches && entry.webSearches.length > 0 && (
-            <Badge tone="info">
-              🔎 חיפוש ברשת: {entry.webSearches.map((w) => w.query).join(', ')}
-            </Badge>
+            <Badge tone="info">🔎 {entry.webSearches.length} חיפושי רשת</Badge>
           )}
         </div>
         <div
@@ -211,6 +209,35 @@ function TranscriptBubble({
         >
           {entry.text}
         </div>
+        {entry.webSearches && entry.webSearches.length > 0 && (
+          <ul className="mt-1.5 flex flex-col gap-1 text-xs text-black/55 dark:text-white/55">
+            {entry.webSearches.map((w, i) => (
+              <li key={i}>
+                <span className="text-black/45 dark:text-white/45">חיפוש: &quot;{w.query}&quot;</span>
+                {w.error ? (
+                  <span className="text-amber-700 dark:text-amber-400"> — {w.error}</span>
+                ) : w.results && w.results.length > 0 ? (
+                  <>
+                    {' — מקורות: '}
+                    {w.results.map((r, j) => (
+                      <span key={r.url}>
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline dark:text-blue-400"
+                        >
+                          {r.title}
+                        </a>
+                        {j < w.results!.length - 1 ? ', ' : ''}
+                      </span>
+                    ))}
+                  </>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

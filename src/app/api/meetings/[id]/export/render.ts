@@ -30,15 +30,24 @@ const PRIORITY_LABELS_HE: Record<MeetingTask['priority'], string> = {
   low: 'נמוכה',
 };
 
+function renderWebSearches(webSearches: NonNullable<TranscriptEntry['webSearches']>): string {
+  const lines = webSearches.map((s) => {
+    if (s.error) return `- "${s.query}" — ${s.error}`;
+    if (s.results && s.results.length > 0) {
+      const links = s.results.map((r) => `[${r.title}](${r.url})`).join(', ');
+      return `- "${s.query}" — מקורות: ${links}`;
+    }
+    return `- "${s.query}"`;
+  });
+  return `\n\n_חיפושי רשת:_\n${lines.join('\n')}`;
+}
+
 function renderTranscript(transcript: TranscriptEntry[]): string {
   if (transcript.length === 0) return '(אין תמליל)';
   return transcript
     .map((e) => {
       const roundPart = e.round != null ? `, סבב ${e.round}` : '';
-      const searches =
-        e.webSearches && e.webSearches.length > 0
-          ? `\n\n_חיפושי רשת: ${e.webSearches.map((s) => s.query).join('; ')}_`
-          : '';
+      const searches = e.webSearches && e.webSearches.length > 0 ? renderWebSearches(e.webSearches) : '';
       return `**[${PHASE_LABELS_HE[e.phase]}${roundPart}] ${e.speakerName}:**\n${e.text}${searches}`;
     })
     .join('\n\n---\n\n');

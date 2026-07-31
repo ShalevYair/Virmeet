@@ -58,7 +58,11 @@ export interface TranscriptEntry {
   speakerName: string;
   round?: number;
   text: string;
-  webSearches?: { query: string }[];
+  webSearches?: {
+    query: string;
+    results?: { title: string; url: string }[];
+    error?: string; // Hebrew — see src/lib/anthropic.ts WEB_SEARCH_ERROR_HE
+  }[];
   usage?: {
     inputTokens: number;
     outputTokens: number;
