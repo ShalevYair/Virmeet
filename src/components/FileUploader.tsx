@@ -58,6 +58,10 @@ export function FileUploader({
   return (
     <div className="flex flex-col gap-3">
       <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        aria-label="גררו קבצים לכאן או לחצו לבחירה"
         onDragOver={(e) => {
           e.preventDefault();
           if (!disabled) setDragging(true);
@@ -69,7 +73,13 @@ export function FileUploader({
           if (!disabled) void handleFiles(e.dataTransfer.files);
         }}
         onClick={() => !disabled && inputRef.current?.click()}
-        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors
+        onKeyDown={(e) => {
+          if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
+        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600
           ${dragging ? 'border-blue-500 bg-blue-500/5' : 'border-black/15 dark:border-white/15'}
           ${disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-black/30 dark:hover:border-white/30'}`}
       >

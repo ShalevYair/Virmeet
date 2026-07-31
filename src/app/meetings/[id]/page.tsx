@@ -18,7 +18,7 @@ import type {
 } from '@/lib/types';
 import { MODELS } from '@/lib/types';
 import { estimateTranscriptCostUsd } from '@/lib/pricing';
-import { Badge, Button, Card, ErrorBanner, Skeleton } from '@/components/ui';
+import { Badge, Button, buttonClasses, Card, ErrorBanner, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 
@@ -397,6 +397,8 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const isAtBottomRef = useRef(true);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -530,6 +532,25 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     return { inputTokens, outputTokens, cacheReadTokens, apiCalls, costUsd };
   }, [transcript, personas]);
 
+  // P5.1 — auto-scroll a live transcript, but only while the user hasn't
+  // scrolled away to read something further up (don't yank them mid-read).
+  useEffect(() => {
+    function updateAtBottom() {
+      const threshold = 80;
+      isAtBottomRef.current =
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold;
+    }
+    updateAtBottom();
+    window.addEventListener('scroll', updateAtBottom, { passive: true });
+    return () => window.removeEventListener('scroll', updateAtBottom);
+  }, []);
+
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [transcript.length]);
+
   async function handleCancel() {
     setCancelling(true);
     try {
@@ -611,11 +632,11 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
           )}
           {status === 'completed' && result && (
             <>
-              <a href={meetingsApi.exportUrl(id, 'md')} download>
-                <Button variant="secondary">ייצוא Markdown</Button>
+              <a className={buttonClasses('secondary')} href={meetingsApi.exportUrl(id, 'md')} download>
+                ייצוא Markdown
               </a>
-              <a href={meetingsApi.exportUrl(id, 'json')} download>
-                <Button variant="secondary">ייצוא JSON</Button>
+              <a className={buttonClasses('secondary')} href={meetingsApi.exportUrl(id, 'json')} download>
+                ייצוא JSON
               </a>
             </>
           )}
@@ -647,6 +668,7 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
             {transcript.map((entry) => (
               <TranscriptBubble key={entry.id} entry={entry} personaById={personaById} />
             ))}
+            <div ref={transcriptEndRef} />
           </div>
         )}
       </Card>

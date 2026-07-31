@@ -32,6 +32,17 @@ const variantClasses: Record<ButtonVariant, string> = {
   ghost: 'bg-transparent hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50',
 };
 
+/**
+ * The visual classes a <Button> renders with — exported so a non-<button>
+ * element (e.g. a download `<a>`, which must never be nested inside a real
+ * `<button>`; spec P5.2) can look identical without an invalid DOM nesting.
+ */
+export function buttonClasses(variant: ButtonVariant = 'secondary', className = ''): string {
+  return `inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+    transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+    disabled:cursor-not-allowed ${variantClasses[variant]} ${className}`;
+}
+
 export function Button({
   children,
   variant = 'secondary',
@@ -39,12 +50,7 @@ export function Button({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
   return (
-    <button
-      className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
-        transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
-        disabled:cursor-not-allowed ${variantClasses[variant]} ${className}`}
-      {...rest}
-    >
+    <button className={buttonClasses(variant, className)} {...rest}>
       {children}
     </button>
   );
