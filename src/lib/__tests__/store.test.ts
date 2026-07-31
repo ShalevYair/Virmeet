@@ -117,4 +117,65 @@ describe('store', () => {
       expect(() => JSON.parse(raw)).not.toThrow();
     });
   });
+
+  describe('meetings summary index (P4.4)', () => {
+    const indexPath = () => path.join(store._internal.MEETINGS_DIR, '_index.json');
+
+    it('is created and kept in sync by createMeeting/updateMeeting/deleteMeeting', async () => {
+      const meeting = await store.createMeeting({
+        title: 'פגישת אינדקס',
+        meetingTypeIds: ['t1'],
+        objective: 'מטרה',
+        participantIds: ['p1', 'p2'],
+      });
+
+      const indexRaw = JSON.parse(await fs.readFile(indexPath(), 'utf-8')) as { id: string; title: string }[];
+      expect(indexRaw.some((m) => m.id === meeting.id && m.title === 'פגישת אינדקס')).toBe(true);
+
+      // listMeetings(true) must never include transcript/result, whether it
+      // came from the index or a full-scan fallback.
+      const summaries = await store.listMeetings(true);
+      const found = summaries.find((m) => m.id === meeting.id);
+      expect(found).toBeDefined();
+      expect(found).not.toHaveProperty('transcript');
+      expect(found).not.toHaveProperty('result');
+
+      await store.updateMeeting(meeting.id, { status: 'cancelled' });
+      const afterUpdate = JSON.parse(await fs.readFile(indexPath(), 'utf-8')) as { id: string; status: string }[];
+      expect(afterUpdate.find((m) => m.id === meeting.id)?.status).toBe('cancelled');
+
+      await store.deleteMeeting(meeting.id);
+      const afterDelete = JSON.parse(await fs.readFile(indexPath(), 'utf-8')) as { id: string }[];
+      expect(afterDelete.some((m) => m.id === meeting.id)).toBe(false);
+    });
+
+    it('falls back to a full scan and self-heals when the index is missing or corrupt', async () => {
+      const meeting = await store.createMeeting({
+        title: 'פגישה לפני קריסת האינדקס',
+        meetingTypeIds: ['t1'],
+        objective: 'מטרה',
+        participantIds: ['p1', 'p2'],
+      });
+
+      await fs.writeFile(indexPath(), '{not valid json at all', 'utf-8');
+
+      const summaries = await store.listMeetings(true);
+      expect(summaries.some((m) => m.id === meeting.id)).toBe(true);
+
+      // The corrupt index should have been repaired by the fallback scan.
+      const repaired = JSON.parse(await fs.readFile(indexPath(), 'utf-8')) as { id: string }[];
+      expect(repaired.some((m) => m.id === meeting.id)).toBe(true);
+    });
+
+    it('never lets "_index.json" itself be mistaken for a meeting id', async () => {
+      await store.createMeeting({
+        title: 'עוד פגישה',
+        meetingTypeIds: ['t1'],
+        objective: 'מטרה',
+        participantIds: ['p1', 'p2'],
+      });
+      const all = await store.listMeetings(false);
+      expect(all.every((m) => m.id !== '_index')).toBe(true);
+    });
+  });
 });

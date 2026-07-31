@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildFacilitatorSystemBlocks, buildPersonaSystemBlocks } from '../engine/prompts';
-import { OrgSettings, Persona } from '../types';
+import {
+  buildDiscussionContextBlock,
+  buildFacilitatorSystemBlocks,
+  buildPersonaSystemBlocks,
+} from '../engine/prompts';
+import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 
 function makeOrg(): OrgSettings {
   return {
@@ -74,5 +78,72 @@ describe('buildFacilitatorSystemBlocks', () => {
   it('returns exactly 2 stable blocks', () => {
     const blocks = buildFacilitatorSystemBlocks(makeOrg());
     expect(blocks).toHaveLength(2);
+  });
+});
+
+describe('buildDiscussionContextBlock (spec P4.3 — cache-friendly prefix growth)', () => {
+  it("round N's context block is a byte-for-byte prefix of round N+1's, once entries are only appended", () => {
+    const meeting: Meeting = {
+      id: 'm1',
+      title: 'כותרת',
+      meetingTypeIds: ['t1'],
+      objective: 'מטרה',
+      participantIds: ['p1'],
+      files: [],
+      discussionRounds: 2,
+      status: 'running',
+      transcript: [],
+      result: null,
+      error: null,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+      createdAt: '',
+      updatedAt: '',
+      completedAt: null,
+    };
+    const meetingTypes: MeetingType[] = [
+      { id: 't1', title: 'סוג', shortDescription: 'x', prompt: 'y', isBuiltIn: true, createdAt: '', updatedAt: '' },
+    ];
+    const opening = { framing: 'מסגור', conflicts: [] };
+
+    const entry = (i: number): TranscriptEntry => ({
+      id: `e${i}`,
+      phase: 'discussion',
+      speakerId: `p${i}`,
+      speakerName: `דובר ${i}`,
+      round: 1,
+      text: `דברי דובר מספר ${i}`,
+      createdAt: '',
+    });
+
+    const roundOne = buildDiscussionContextBlock(meeting, meetingTypes, opening, [entry(1)]);
+    const roundTwo = buildDiscussionContextBlock(meeting, meetingTypes, opening, [entry(1), entry(2)]);
+
+    expect(roundTwo.startsWith(roundOne)).toBe(true);
+    expect(roundTwo.length).toBeGreaterThan(roundOne.length);
+  });
+
+  it('never embeds the round number — that lives in the separate, un-cached instruction block', () => {
+    const meeting: Meeting = {
+      id: 'm1',
+      title: 'כותרת',
+      meetingTypeIds: ['t1'],
+      objective: 'מטרה',
+      participantIds: ['p1'],
+      files: [],
+      discussionRounds: 2,
+      status: 'running',
+      transcript: [],
+      result: null,
+      error: null,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+      createdAt: '',
+      updatedAt: '',
+      completedAt: null,
+    };
+    const meetingTypes: MeetingType[] = [
+      { id: 't1', title: 'סוג', shortDescription: 'x', prompt: 'y', isBuiltIn: true, createdAt: '', updatedAt: '' },
+    ];
+    const block = buildDiscussionContextBlock(meeting, meetingTypes, { framing: 'f', conflicts: [] }, []);
+    expect(block).not.toMatch(/סבב \d+ מתוך \d+/);
   });
 });

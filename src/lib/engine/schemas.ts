@@ -68,96 +68,105 @@ export const OPENING_SCHEMA = {
  * Phase 4 (`extraction`) — the full MeetingResult, minus `tasks[].id` which
  * the runner assigns itself after parsing (the model references tasks by
  * title in `dependsOn`, per spec §1).
+ *
+ * `ownerName` is constrained to an enum of the actual participant names (plus
+ * "לא שויך") — spec P4.1: a free-text `ownerName` lets any slightly-different
+ * phrasing of a name (e.g. "המנמ"ר" vs "מנמ"ר (CIO)") silently produce
+ * `ownerPersonaId: null` in the runner. The enum makes the model pick from a
+ * closed, known-good set instead.
  */
-export const EXTRACTION_SCHEMA = {
-  type: 'object',
-  properties: {
-    summary: { type: 'string', description: 'סיכום קצר של הפגישה כולה.' },
-    decisions: {
-      type: 'array',
-      description: 'החלטות שהתקבלו בפועל במהלך הפגישה.',
-      items: { type: 'string' },
-    },
-    openQuestions: {
-      type: 'array',
-      description: 'שאלות שנותרו פתוחות בסיום הפגישה.',
-      items: {
-        type: 'object',
-        properties: {
-          question: { type: 'string' },
-          whoShouldAnswer: { type: 'string', description: 'מי אמור לספק תשובה לשאלה הזו.' },
-          blocking: { type: 'boolean', description: 'האם השאלה חוסמת המשך התקדמות.' },
+export function buildExtractionSchema(participantNames: string[]) {
+  return {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'סיכום קצר של הפגישה כולה.' },
+      decisions: {
+        type: 'array',
+        description: 'החלטות שהתקבלו בפועל במהלך הפגישה.',
+        items: { type: 'string' },
+      },
+      openQuestions: {
+        type: 'array',
+        description: 'שאלות שנותרו פתוחות בסיום הפגישה.',
+        items: {
+          type: 'object',
+          properties: {
+            question: { type: 'string' },
+            whoShouldAnswer: { type: 'string', description: 'מי אמור לספק תשובה לשאלה הזו.' },
+            blocking: { type: 'boolean', description: 'האם השאלה חוסמת המשך התקדמות.' },
+          },
+          required: ['question', 'whoShouldAnswer', 'blocking'],
+          additionalProperties: false,
         },
-        required: ['question', 'whoShouldAnswer', 'blocking'],
-        additionalProperties: false,
+      },
+      conflicts: {
+        type: 'array',
+        description: 'התנגשויות בין עמדות שעלו במהלך הדיון (כולל כאלה שלא נפתרו).',
+        items: {
+          type: 'object',
+          properties: {
+            topic: { type: 'string' },
+            sides: { type: 'string' },
+          },
+          required: ['topic', 'sides'],
+          additionalProperties: false,
+        },
+      },
+      risks: {
+        type: 'array',
+        description: 'סיכונים שזוהו במהלך הפגישה.',
+        items: { type: 'string' },
+      },
+      tasks: {
+        type: 'array',
+        description: 'משימות לביצוע שנגזרות מהפגישה.',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
+            ownerName: {
+              type: 'string',
+              description: 'שם בעל המשימה — חייב להיות אחד מהמשתתפים ברשימה, או "לא שויך".',
+              enum: [...participantNames, 'לא שויך'],
+            },
+            priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+            dependsOn: {
+              type: 'array',
+              description: 'כותרות של משימות אחרות שהמשימה הזו תלויה בהן.',
+              items: { type: 'string' },
+            },
+            assumption: {
+              type: 'string',
+              description: 'ההנחה שעליה המשימה נשענת.',
+            },
+            riskIfAssumptionWrong: {
+              type: 'string',
+              description: 'הסיכון אם ההנחה הזו מתבררת כשגויה.',
+            },
+          },
+          required: [
+            'title',
+            'description',
+            'ownerName',
+            'priority',
+            'dependsOn',
+            'assumption',
+            'riskIfAssumptionWrong',
+          ],
+          additionalProperties: false,
+        },
+      },
+      modelAssumptions: {
+        type: 'array',
+        description: 'כל מה שהמודל השלים בעצמו בזמן החילוץ (לא נאמר במפורש בדיון) — מסומן במפורש.',
+        items: { type: 'string' },
       },
     },
-    conflicts: {
-      type: 'array',
-      description: 'התנגשויות בין עמדות שעלו במהלך הדיון (כולל כאלה שלא נפתרו).',
-      items: {
-        type: 'object',
-        properties: {
-          topic: { type: 'string' },
-          sides: { type: 'string' },
-        },
-        required: ['topic', 'sides'],
-        additionalProperties: false,
-      },
-    },
-    risks: {
-      type: 'array',
-      description: 'סיכונים שזוהו במהלך הפגישה.',
-      items: { type: 'string' },
-    },
-    tasks: {
-      type: 'array',
-      description: 'משימות לביצוע שנגזרות מהפגישה.',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          ownerName: {
-            type: 'string',
-            description: 'שם בעל המשימה (מבין המשתתפים), או "לא שויך" אם אין בעלים ברור.',
-          },
-          priority: { type: 'string', enum: ['high', 'medium', 'low'] },
-          dependsOn: {
-            type: 'array',
-            description: 'כותרות של משימות אחרות שהמשימה הזו תלויה בהן.',
-            items: { type: 'string' },
-          },
-          assumption: {
-            type: 'string',
-            description: 'ההנחה שעליה המשימה נשענת.',
-          },
-          riskIfAssumptionWrong: {
-            type: 'string',
-            description: 'הסיכון אם ההנחה הזו מתבררת כשגויה.',
-          },
-        },
-        required: [
-          'title',
-          'description',
-          'ownerName',
-          'priority',
-          'dependsOn',
-          'assumption',
-          'riskIfAssumptionWrong',
-        ],
-        additionalProperties: false,
-      },
-    },
-    modelAssumptions: {
-      type: 'array',
-      description: 'כל מה שהמודל השלים בעצמו בזמן החילוץ (לא נאמר במפורש בדיון) — מסומן במפורש.',
-      items: { type: 'string' },
-    },
-  },
-  required: ['summary', 'decisions', 'openQuestions', 'conflicts', 'risks', 'tasks', 'modelAssumptions'],
-  additionalProperties: false,
-} as const;
+    required: ['summary', 'decisions', 'openQuestions', 'conflicts', 'risks', 'tasks', 'modelAssumptions'],
+    additionalProperties: false,
+  } as const;
+}
 
 /** Shape produced by the model for extraction, before the runner assigns task ids and owner persona ids. */
 export interface ExtractionModelOutput {

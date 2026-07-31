@@ -26,7 +26,7 @@ import {
 } from '../store';
 import { CallBudget } from './budget';
 import * as prompts from './prompts';
-import { EXTRACTION_SCHEMA, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
+import { buildExtractionSchema, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
 import { OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
 
 const defaultDeps: RunMeetingDeps = {
@@ -392,15 +392,19 @@ export async function runMeeting(
           messages: [
             {
               role: 'user',
-              content: prompts.buildDiscussionUserMessage(
-                meeting,
-                meetingTypes,
-                persona,
-                round,
-                totalRounds,
-                opening,
-                transcript
-              ),
+              content: [
+                {
+                  type: 'text',
+                  text: prompts.buildDiscussionContextBlock(meeting, meetingTypes, opening, transcript),
+                  // Stable, growing-by-append prefix (§P4.3) — breakpoint here lets a
+                  // persona's later rounds read this whole block from cache.
+                  cache_control: { type: 'ephemeral' },
+                },
+                {
+                  type: 'text',
+                  text: prompts.buildDiscussionInstructionBlock(persona, round, totalRounds),
+                },
+              ],
             },
           ],
           maxTokens: REGULAR_MAX_TOKENS,
@@ -502,7 +506,7 @@ export async function runMeeting(
       ],
       maxTokens: REGULAR_MAX_TOKENS,
       effort: 'high',
-      jsonSchema: EXTRACTION_SCHEMA,
+      jsonSchema: buildExtractionSchema(participants.map((p) => p.name)),
       apiKey,
       signal,
     });
@@ -514,6 +518,38 @@ export async function runMeeting(
 
     const raw = JSON.parse(result.text) as ExtractionModelOutput;
     const personaIdByName = new Map(participants.map((p) => [p.name, p.id]));
+    const taskTitles = new Set(raw.tasks.map((t) => t.title));
+
+    // P4.1/P4.2 — the enum constrains ownerName, and dependsOn titles are
+    // validated against the actual task list; anything that still slips
+    // through (defense in depth, not expected in normal operation) is
+    // filtered rather than silently kept, and surfaced in modelAssumptions.
+    const extractionAssumptions: string[] = [];
+
+    const tasks = raw.tasks.map((t) => {
+      const ownerPersonaId = personaIdByName.get(t.ownerName) ?? null;
+      if (ownerPersonaId === null && t.ownerName !== 'לא שויך') {
+        extractionAssumptions.push(`המנחה שייך את המשימה "${t.title}" לשם לא מוכר: "${t.ownerName}".`);
+      }
+      const dependsOn = t.dependsOn.filter((dep) => {
+        if (taskTitles.has(dep)) return true;
+        extractionAssumptions.push(`המנחה הפנה לתלות במשימה שאינה קיימת: "${dep}" (במשימה "${t.title}").`);
+        return false;
+      });
+      return {
+        id: randomUUID(),
+        title: t.title,
+        description: t.description,
+        ownerPersonaId,
+        ownerName: t.ownerName,
+        priority: t.priority,
+        dependsOn,
+        assumption: t.assumption,
+        riskIfAssumptionWrong: t.riskIfAssumptionWrong,
+      };
+    });
+
+    const modelAssumptions = [...raw.modelAssumptions, ...extractionAssumptions, ...(budgetCapHit ? [budgetCapHit] : [])];
 
     const finalResult: MeetingResult = {
       summary: raw.summary,
@@ -521,18 +557,8 @@ export async function runMeeting(
       openQuestions: raw.openQuestions,
       conflicts: raw.conflicts,
       risks: raw.risks,
-      modelAssumptions: budgetCapHit ? [...raw.modelAssumptions, budgetCapHit] : raw.modelAssumptions,
-      tasks: raw.tasks.map((t) => ({
-        id: randomUUID(),
-        title: t.title,
-        description: t.description,
-        ownerPersonaId: personaIdByName.get(t.ownerName) ?? null,
-        ownerName: t.ownerName,
-        priority: t.priority,
-        dependsOn: t.dependsOn,
-        assumption: t.assumption,
-        riskIfAssumptionWrong: t.riskIfAssumptionWrong,
-      })),
+      modelAssumptions,
+      tasks,
     };
 
     await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null });

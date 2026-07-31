@@ -184,12 +184,19 @@ ${prepBlock}
 // Phase 2 — discussion (N rounds, sequential turns)
 // ---------------------------------------------------------------------------
 
-export function buildDiscussionUserMessage(
+/**
+ * Stable prefix for a discussion-turn user message: header + framing +
+ * conflicts + transcript-so-far, with no per-round content in it. Because
+ * `transcriptSoFar` only ever grows by appending (never rewriting past
+ * entries), this text is a byte-for-byte prefix of what the same persona
+ * will see on their next turn — the precondition for `cache_control` on
+ * this block to actually produce cache reads across rounds (spec P4.3).
+ * The round-specific instruction (which does change every turn) is a
+ * separate, deliberately un-cached block — see `buildDiscussionInstructionBlock`.
+ */
+export function buildDiscussionContextBlock(
   meeting: Meeting,
   meetingTypes: MeetingType[],
-  persona: Persona,
-  round: number,
-  totalRounds: number,
   opening: OpeningOutput,
   transcriptSoFar: TranscriptEntry[]
 ): string {
@@ -201,10 +208,13 @@ ${opening.framing}
 # ההתנגשויות שזוהו
 ${formatConflicts(opening.conflicts)}
 
-# מה נאמר עד כה (סבב ${round} מתוך ${totalRounds})
-${formatTranscript(transcriptSoFar)}
+# מה נאמר עד כה
+${formatTranscript(transcriptSoFar)}`;
+}
 
-# המשימה שלך עכשיו
+/** The volatile part of a discussion turn — changes every round, so it stays out of the cached block above. */
+export function buildDiscussionInstructionBlock(persona: Persona, round: number, totalRounds: number): string {
+  return `# המשימה שלך עכשיו (סבב ${round} מתוך ${totalRounds})
 
 זהו תורך לדבר, כ${persona.role}. הנחיות מחייבות:
 - הגב **ישירות** למה שנאמר בפועל בתמליל למעלה — ציין מי אמר מה ולמה אתה מסכים,

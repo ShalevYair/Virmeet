@@ -345,3 +345,71 @@ describe('runMeeting — Hebrew error mapping (P1.2 regression)', () => {
     expect(errorLine?.text).not.toContain('Request timed out');
   });
 });
+
+describe('runMeeting — extraction data hygiene (P4.1/P4.2 regression)', () => {
+  it('does not silently drop a task owner match, and flags an unrecognized name or dangling dependsOn', async () => {
+    const personas = [makePersona('p1', 'Alice'), makePersona('p2', 'Bob')];
+    const meeting = makeMeeting('m1', ['p1', 'p2'], { discussionRounds: 1 });
+    const { deps, getStored } = makeHarness(personas, meeting);
+
+    await runMeeting(
+      'm1',
+      () => {},
+      {
+        ...deps,
+        callModel: async (opts) => {
+          if (isExtractionCall(opts)) {
+            return {
+              text: JSON.stringify({
+                summary: 's',
+                decisions: [],
+                openQuestions: [],
+                conflicts: [],
+                risks: [],
+                modelAssumptions: [],
+                tasks: [
+                  {
+                    title: 'task-a',
+                    description: 'd',
+                    ownerName: 'Alice', // exact match — must resolve cleanly
+                    priority: 'medium',
+                    dependsOn: [],
+                    assumption: 'a',
+                    riskIfAssumptionWrong: 'r',
+                  },
+                  {
+                    title: 'task-b',
+                    description: 'd',
+                    ownerName: 'Alicia', // close-but-not-identical — must NOT silently resolve
+                    priority: 'low',
+                    dependsOn: ['task-a', 'task-does-not-exist'],
+                    assumption: 'a',
+                    riskIfAssumptionWrong: 'r',
+                  },
+                ],
+              }),
+              webSearches: [],
+              usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0 },
+              refused: false,
+            };
+          }
+          return structuredOk(opts);
+        },
+      }
+    );
+
+    const result = getStored().result;
+    expect(result).not.toBeNull();
+
+    const taskA = result!.tasks.find((t) => t.title === 'task-a')!;
+    expect(taskA.ownerPersonaId).toBe('p1');
+
+    const taskB = result!.tasks.find((t) => t.title === 'task-b')!;
+    expect(taskB.ownerPersonaId).toBeNull();
+    expect(taskB.ownerName).toBe('Alicia'); // preserved verbatim for display, even though unresolved
+    expect(taskB.dependsOn).toEqual(['task-a']); // the dangling reference was filtered out
+
+    expect(result!.modelAssumptions.some((a) => a.includes('שם לא מוכר') && a.includes('Alicia'))).toBe(true);
+    expect(result!.modelAssumptions.some((a) => a.includes('task-does-not-exist'))).toBe(true);
+  });
+});

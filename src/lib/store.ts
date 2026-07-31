@@ -348,15 +348,77 @@ function meetingFilePath(id: string): string {
   return path.join(MEETINGS_DIR, `${id}.json`);
 }
 
+// P4.4 — a summary-only index so the dashboard doesn't have to read every
+// meeting file (transcript included) just to list titles/statuses. Kept
+// under its own lock, separate from any single meeting's file lock, and
+// updated alongside create/update/delete. If it's ever missing or corrupt,
+// listMeetings() transparently falls back to a full scan and repairs it.
+const MEETINGS_INDEX_FILE = path.join(MEETINGS_DIR, '_index.json');
+const MEETINGS_INDEX_BASENAME = '_index.json';
+
+function toMeetingSummary(meeting: Meeting): MeetingSummary {
+  const { transcript: _transcript, result: _result, ...rest } = meeting;
+  return rest;
+}
+
 async function listMeetingIds(): Promise<string[]> {
   await ensureDir(MEETINGS_DIR);
   const entries = await fs.readdir(MEETINGS_DIR);
-  return entries.filter((f) => f.endsWith('.json') && !f.endsWith('.tmp')).map((f) => f.slice(0, -'.json'.length));
+  return entries
+    .filter((f) => f.endsWith('.json') && !f.endsWith('.tmp') && f !== MEETINGS_INDEX_BASENAME)
+    .map((f) => f.slice(0, -'.json'.length));
+}
+
+async function scanMeetingsSummary(): Promise<MeetingSummary[]> {
+  const ids = await listMeetingIds();
+  const summaries: MeetingSummary[] = [];
+  for (const id of ids) {
+    const meeting = await getMeeting(id);
+    if (meeting) summaries.push(toMeetingSummary(meeting));
+  }
+  return summaries;
+}
+
+async function readMeetingsIndex(): Promise<MeetingSummary[] | null> {
+  if (!(await fileExists(MEETINGS_INDEX_FILE))) return null;
+  try {
+    const raw = await fs.readFile(MEETINGS_INDEX_FILE, 'utf-8');
+    return JSON.parse(raw) as MeetingSummary[];
+  } catch {
+    return null;
+  }
+}
+
+/** Insert/replace one meeting's entry in the index, rebuilding it from a full scan first if it's missing or corrupt. */
+async function upsertMeetingIndexEntry(summary: MeetingSummary): Promise<void> {
+  await withFileLock(MEETINGS_INDEX_FILE, async () => {
+    const current = (await readMeetingsIndex()) ?? (await scanMeetingsSummary());
+    const next = [...current.filter((m) => m.id !== summary.id), summary];
+    await writeJsonAtomic(MEETINGS_INDEX_FILE, next);
+  });
+}
+
+async function removeMeetingIndexEntry(id: string): Promise<void> {
+  await withFileLock(MEETINGS_INDEX_FILE, async () => {
+    const current = await readMeetingsIndex();
+    if (current === null) return; // nothing to repair here — a later write will rebuild it
+    await writeJsonAtomic(MEETINGS_INDEX_FILE, current.filter((m) => m.id !== id));
+  });
 }
 
 export function listMeetings(summaryOnly: true): Promise<MeetingSummary[]>;
 export function listMeetings(summaryOnly?: false): Promise<Meeting[]>;
 export async function listMeetings(summaryOnly = false): Promise<Meeting[] | MeetingSummary[]> {
+  if (summaryOnly) {
+    const index = await readMeetingsIndex();
+    const summaries = index ?? (await scanMeetingsSummary());
+    if (index === null) {
+      // Self-heal: missing/corrupt index — repair it for next time, best-effort.
+      await writeJsonAtomic(MEETINGS_INDEX_FILE, summaries).catch(() => undefined);
+    }
+    return [...summaries].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
   const ids = await listMeetingIds();
   const meetings: Meeting[] = [];
   for (const id of ids) {
@@ -364,8 +426,7 @@ export async function listMeetings(summaryOnly = false): Promise<Meeting[] | Mee
     if (meeting) meetings.push(meeting);
   }
   meetings.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  if (!summaryOnly) return meetings;
-  return meetings.map(({ transcript: _transcript, result: _result, ...rest }) => rest);
+  return meetings;
 }
 
 export async function getMeeting(id: string): Promise<Meeting | null> {
@@ -399,6 +460,7 @@ export async function createMeeting(input: MeetingCreateInput): Promise<Meeting>
     completedAt: null,
   };
   await writeJsonLocked(meetingFilePath(meeting.id), meeting);
+  await upsertMeetingIndexEntry(toMeetingSummary(meeting));
   return meeting;
 }
 
@@ -426,6 +488,7 @@ export async function updateMeeting(id: string, patch: Partial<Meeting>): Promis
       updatedAt: nowIso(),
     };
     await writeJsonAtomic(filePath, updated);
+    await upsertMeetingIndexEntry(toMeetingSummary(updated));
     return updated;
   });
 }
@@ -440,6 +503,7 @@ export async function deleteMeeting(id: string): Promise<boolean> {
   if (!(await fileExists(filePath))) return false;
   await fs.rm(filePath, { force: true });
   await fs.rm(`${filePath}.tmp`, { force: true }).catch(() => undefined);
+  await removeMeetingIndexEntry(id);
   return true;
 }
 
