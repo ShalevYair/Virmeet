@@ -344,6 +344,7 @@ function MeetingRunInner({ id }: { id: string }) {
   const [result, setResult] = useState<MeetingResult | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -384,6 +385,64 @@ function MeetingRunInner({ id }: { id: string }) {
     }, 2500);
   }
 
+  // Drives both the automatic first run (from the load effect below) and the
+  // "הרץ שוב" button on a failed/cancelled meeting. `isRerun` resets the
+  // local transcript/result/error/phase state first — api-client.runMeeting
+  // already resets the *stored* transcript/usage before a re-run, but the
+  // state here was populated from the old meeting by applyMeeting, and
+  // onEntry only appends, so without this reset the UI would show the old
+  // transcript followed by the new one even though storage never did.
+  async function startRun(isRerun: boolean) {
+    hasStartedRef.current = true;
+    if (isRerun) {
+      setTranscript([]);
+      setResult(null);
+      setRunError(null);
+      setCurrentPhase('prep');
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStatus('running');
+    await runMeeting(id, {
+      signal: controller.signal,
+      onPhase: (phase) => setCurrentPhase(phase),
+      onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
+      onDone: (res) => {
+        setResult(res);
+        setStatus('completed');
+        stopPolling();
+      },
+      onError: (message) => {
+        setRunError(message);
+        setStatus('failed');
+        stopPolling();
+      },
+      onCancelled: () => {
+        setStatus('cancelled');
+        stopPolling();
+      },
+    });
+    // Stream ended without a terminal event — reconcile with IndexedDB
+    // instead of guessing.
+    const fresh = await meetingsApi.get(id).catch(() => null);
+    if (fresh && (fresh.status === 'completed' || fresh.status === 'failed' || fresh.status === 'cancelled')) {
+      applyMeeting(fresh);
+    } else if (fresh && fresh.status === 'running') {
+      applyMeeting(fresh);
+      startPolling();
+    }
+  }
+
+  async function handleRerun() {
+    if (starting) return;
+    setStarting(true);
+    try {
+      await startRun(true);
+    } finally {
+      setStarting(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
@@ -394,39 +453,7 @@ function MeetingRunInner({ id }: { id: string }) {
         setPersonas(people);
 
         if (m.status === 'draft' && !hasStartedRef.current) {
-          hasStartedRef.current = true;
-          const controller = new AbortController();
-          abortRef.current = controller;
-          setStatus('running');
-          runMeeting(id, {
-            signal: controller.signal,
-            onPhase: (phase) => setCurrentPhase(phase),
-            onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
-            onDone: (res) => {
-              setResult(res);
-              setStatus('completed');
-              stopPolling();
-            },
-            onError: (message) => {
-              setRunError(message);
-              setStatus('failed');
-              stopPolling();
-            },
-            onCancelled: () => {
-              setStatus('cancelled');
-              stopPolling();
-            },
-          }).then(async () => {
-            // Stream ended without a terminal event — reconcile with
-            // IndexedDB instead of guessing.
-            const fresh = await meetingsApi.get(id).catch(() => null);
-            if (fresh && (fresh.status === 'completed' || fresh.status === 'failed' || fresh.status === 'cancelled')) {
-              applyMeeting(fresh);
-            } else if (fresh && fresh.status === 'running') {
-              applyMeeting(fresh);
-              startPolling();
-            }
-          });
+          void startRun(false);
         } else if (m.status === 'running') {
           // A run is already in progress in another tab, or this tab was
           // reloaded mid-run (the engine promise died with the old page) —
@@ -514,6 +541,11 @@ function MeetingRunInner({ id }: { id: string }) {
           {isLive && (
             <Button variant="danger" onClick={() => setCancelOpen(true)}>
               בטל פגישה
+            </Button>
+          )}
+          {(status === 'failed' || status === 'cancelled') && (
+            <Button variant="secondary" onClick={handleRerun} disabled={starting}>
+              הרץ שוב
             </Button>
           )}
           {status === 'completed' && result && (

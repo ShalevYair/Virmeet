@@ -23,7 +23,7 @@ vi.mock('./engine/runner', () => ({
 }));
 
 // Imported after the mocks above so api-client.ts picks up the mocked modules.
-const { runMeeting } = await import('./api-client');
+const { runMeeting, meetingsApi, ApiError } = await import('./api-client');
 
 beforeEach(() => {
   getMeetingMock.mockReset();
@@ -130,5 +130,33 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
       usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
     });
     expect(engineRunMeetingMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('meetingsApi.update — returning a meeting to draft', () => {
+  it('rejects returning a completed meeting to draft', async () => {
+    const meeting = makeMeeting({ status: 'completed' });
+    getMeetingMock.mockResolvedValue(meeting);
+
+    await expect(meetingsApi.update(meeting.id, { status: 'draft' })).rejects.toThrow(ApiError);
+    expect(updateMeetingMock).not.toHaveBeenCalled();
+  });
+
+  it('allows returning a failed meeting to draft', async () => {
+    const meeting = makeMeeting({ status: 'failed' });
+    getMeetingMock.mockResolvedValue(meeting);
+    updateMeetingMock.mockResolvedValue({ ...meeting, status: 'draft' });
+
+    await expect(meetingsApi.update(meeting.id, { status: 'draft' })).resolves.toMatchObject({ status: 'draft' });
+    expect(updateMeetingMock).toHaveBeenCalledWith(meeting.id, { status: 'draft' });
+  });
+
+  it('allows returning a cancelled meeting to draft', async () => {
+    const meeting = makeMeeting({ status: 'cancelled' });
+    getMeetingMock.mockResolvedValue(meeting);
+    updateMeetingMock.mockResolvedValue({ ...meeting, status: 'draft' });
+
+    await expect(meetingsApi.update(meeting.id, { status: 'draft' })).resolves.toMatchObject({ status: 'draft' });
+    expect(updateMeetingMock).toHaveBeenCalledWith(meeting.id, { status: 'draft' });
   });
 });
