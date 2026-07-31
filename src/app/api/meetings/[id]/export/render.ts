@@ -3,6 +3,7 @@
 // as the opening lines of every Markdown export.
 
 import { Meeting, MeetingTask, TranscriptEntry } from '@/lib/types';
+import { formatUsd } from '@/lib/pricing';
 
 export const DISCLAIMER_HE =
   'הפלט הזה הוא הכנה לפגישה, לא תחליף לה. הדעות כאן נוצרו על ידי מודל שפה ואינן מייצגות את עמדתם של אנשים אמיתיים.';
@@ -74,6 +75,21 @@ export function renderMarkdown(meeting: Meeting): string {
   parts.push(
     `**מטרה:** ${meeting.objective || '(לא הוגדרה)'}\n\n**סטטוס:** ${STATUS_LABELS_HE[meeting.status]}\n\n**מספר סבבי דיון:** ${meeting.discussionRounds}`
   );
+
+  if (meeting.usage.apiCalls > 0) {
+    const u = meeting.usage;
+    const totalTokens = u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheCreationTokens;
+    const cacheReadPct = totalTokens > 0 ? Math.round((u.cacheReadTokens / totalTokens) * 100) : 0;
+    parts.push(
+      `## שימוש ועלות\n\n` +
+        `- קריאות מודל: ${u.apiCalls}\n` +
+        `- טוקני קלט: ${u.inputTokens.toLocaleString('he-IL')}\n` +
+        `- טוקני פלט: ${u.outputTokens.toLocaleString('he-IL')}\n` +
+        `- טוקני cache שנקראו: ${u.cacheReadTokens.toLocaleString('he-IL')} (${cacheReadPct}% מסך הטוקנים)\n` +
+        `- טוקני cache שנכתבו: ${u.cacheCreationTokens.toLocaleString('he-IL')}\n` +
+        `- **עלות מוערכת: ${formatUsd(u.costUsd)}** (הערכה בלבד, מבוססת על מחירון קבוע בקוד שעשוי להשתנות — לא חיוב בפועל)`
+    );
+  }
 
   if (meeting.error) {
     parts.push(`## שגיאה\n${meeting.error}`);

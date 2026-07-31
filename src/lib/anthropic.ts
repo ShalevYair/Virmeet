@@ -58,6 +58,7 @@ export interface CallModelUsage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  cacheCreationTokens: number;
 }
 
 export interface WebSearchQuery {
@@ -163,6 +164,7 @@ function usageFrom(usage: Anthropic.Usage): CallModelUsage {
     inputTokens: usage.input_tokens ?? 0,
     outputTokens: usage.output_tokens ?? 0,
     cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
   };
 }
 

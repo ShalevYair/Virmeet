@@ -68,7 +68,7 @@ function makeMeeting(participantIds: string[], meetingTypeIds: string[], overrid
     transcript: [],
     result: null,
     error: null,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, apiCalls: 0, costUsd: 0 },
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -77,7 +77,7 @@ function makeMeeting(participantIds: string[], meetingTypeIds: string[], overrid
 }
 
 function usage(): CallModelUsage {
-  return { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 };
+  return { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 };
 }
 
 function okResult(text: string): CallModelResult {
@@ -179,14 +179,25 @@ describe('runMeeting', () => {
 
     const done = events.find((e) => e.type === 'done');
     expect(done).toBeDefined();
+    if (done?.type === 'done') {
+      // The extraction call never produces a transcript entry, so 'done' carries its own usage/cost.
+      expect(done.usage.outputTokens).toBeGreaterThan(0);
+      expect(done.usage.costUsd).toBeGreaterThan(0);
+    }
 
     // prep(2) + opening(1) + discussion(2, one round) + convergence(1) = 6 transcript entries.
     expect(final.transcript).toHaveLength(6);
     expect(final.transcript.filter((e) => e.phase === 'prep')).toHaveLength(2);
     expect(final.transcript.filter((e) => e.phase === 'discussion')).toHaveLength(2);
+    // Every non-system transcript entry carries a priced usage breakdown.
+    for (const entry of final.transcript) {
+      if (entry.speakerId === 'system') continue;
+      expect(entry.usage?.costUsd).toBeGreaterThan(0);
+    }
 
     // prep(2) + opening(1) + discussion(2) + convergence(1) + extraction(1) = 7 model calls.
     expect(final.usage.apiCalls).toBe(7);
+    expect(final.usage.costUsd).toBeGreaterThan(0);
   });
 
   it('a single persona failing in prep is logged and the meeting continues', async () => {

@@ -6,7 +6,8 @@
 import { NextResponse } from 'next/server';
 import { getMeeting, getOrgSettings, listMeetingTypes, listPersonas, updateMeeting } from '@/lib/store';
 import { runExtraction } from '@/lib/engine/runner';
-import { MeetingType, Persona, TranscriptEntry } from '@/lib/types';
+import { MeetingType, MODELS, Persona, TranscriptEntry } from '@/lib/types';
+import { estimateCallCostUsd } from '@/lib/pricing';
 import { internalError, jsonError, requireApiKey } from '../../../_lib/http';
 
 interface RouteContext {
@@ -65,11 +66,14 @@ export async function POST(req: Request, { params }: RouteContext) {
       clientApiKey
     );
 
+    const costUsd = estimateCallCostUsd(MODELS.facilitator, outcome.usage);
     const usage = {
       inputTokens: meeting.usage.inputTokens + outcome.usage.inputTokens,
       outputTokens: meeting.usage.outputTokens + outcome.usage.outputTokens,
       cacheReadTokens: meeting.usage.cacheReadTokens + outcome.usage.cacheReadTokens,
+      cacheCreationTokens: meeting.usage.cacheCreationTokens + outcome.usage.cacheCreationTokens,
       apiCalls: meeting.usage.apiCalls + 1,
+      costUsd: meeting.usage.costUsd + costUsd,
     };
 
     const updated = await updateMeeting(

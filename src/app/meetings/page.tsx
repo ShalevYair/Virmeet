@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ApiError, MeetingSummary, meetingsApi } from '@/lib/api-client';
 import { Badge, Button, Card, EmptyState, ErrorBanner, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { formatUsd } from '@/lib/pricing';
 
 const STATUS_LABEL: Record<MeetingSummary['status'], string> = {
   draft: 'טיוטה',
@@ -112,6 +113,14 @@ export default function MeetingsPage() {
               </Link>
               <div className="flex shrink-0 items-center gap-3">
                 <span className="text-xs text-black/50 dark:text-white/50">{formatDate(m.createdAt)}</span>
+                {m.usage.apiCalls > 0 && (
+                  <span
+                    className="text-xs text-black/50 dark:text-white/50"
+                    title="הערכת עלות בלבד — לא חיוב בפועל."
+                  >
+                    {formatUsd(m.usage.costUsd)}
+                  </span>
+                )}
                 <Badge tone={STATUS_TONE[m.status]}>{STATUS_LABEL[m.status]}</Badge>
                 <Button
                   variant="ghost"

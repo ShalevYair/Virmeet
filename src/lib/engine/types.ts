@@ -3,15 +3,21 @@
 // depends on. Kept separate from src/lib/types.ts (the persisted data model).
 
 import { Meeting, MeetingPhase, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
-import { CallModelOptions, CallModelResult } from '../anthropic';
+import { CallModelOptions, CallModelResult, CallModelUsage } from '../anthropic';
 
 export type PhaseName = MeetingPhase;
+
+/** Non-null variant of TranscriptEntry['usage'] — a call's raw token usage plus its estimated cost. */
+export type CallUsageWithCost = CallModelUsage & { costUsd: number };
 
 /** Events streamed out of runMeeting() — mirrors the SSE payloads verbatim (spec §4, §5). */
 export type MeetingEvent =
   | { type: 'phase'; phase: PhaseName }
   | { type: 'entry'; entry: TranscriptEntry }
-  | { type: 'done'; result: MeetingResult }
+  // `usage` is the extraction call's own usage — the only model call in the
+  // run that never produces a transcript entry, so callers accumulating cost
+  // from 'entry' events need this to see the full picture (C1 in WORKPLAN.md).
+  | { type: 'done'; result: MeetingResult; usage: CallUsageWithCost }
   | { type: 'error'; message: string };
 
 export type OnEvent = (event: MeetingEvent) => void;

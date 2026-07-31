@@ -19,6 +19,7 @@ import type {
 import { Badge, Button, Card, ErrorBanner, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
+import { formatUsd } from '@/lib/pricing';
 
 const PHASE_ORDER: MeetingPhase[] = ['prep', 'opening', 'discussion', 'convergence', 'extraction'];
 const PHASE_LABEL: Record<MeetingPhase, string> = {
@@ -123,6 +124,48 @@ function PhaseRail({ current, status }: { current: MeetingPhase; status: Meeting
         );
       })}
     </Card>
+  );
+}
+
+/**
+ * Best-effort running total from transcript entries while a run is still
+ * live — the extraction call never produces an entry, so this necessarily
+ * undercounts until the meeting finishes and the authoritative
+ * `meeting.usage` (refetched on completion) takes over (C1 in WORKPLAN.md).
+ */
+function sumTranscriptUsage(transcript: TranscriptEntry[]): Meeting['usage'] {
+  return transcript.reduce(
+    (acc, e) => {
+      if (!e.usage) return acc;
+      return {
+        inputTokens: acc.inputTokens + e.usage.inputTokens,
+        outputTokens: acc.outputTokens + e.usage.outputTokens,
+        cacheReadTokens: acc.cacheReadTokens + e.usage.cacheReadTokens,
+        cacheCreationTokens: acc.cacheCreationTokens + e.usage.cacheCreationTokens,
+        apiCalls: acc.apiCalls + 1,
+        costUsd: acc.costUsd + e.usage.costUsd,
+      };
+    },
+    { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, apiCalls: 0, costUsd: 0 }
+  );
+}
+
+function UsageStrip({ usage, isLive }: { usage: Meeting['usage']; isLive: boolean }) {
+  const totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  const cacheReadPct = totalTokens > 0 ? Math.round((usage.cacheReadTokens / totalTokens) * 100) : 0;
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-black/55 dark:text-white/55">
+      <span>{usage.apiCalls.toLocaleString('he-IL')} קריאות מודל</span>
+      <span>{totalTokens.toLocaleString('he-IL')} טוקנים</span>
+      {usage.cacheReadTokens > 0 && <span>{cacheReadPct}% מה-cache</span>}
+      <span
+        className="font-medium text-black/70 dark:text-white/70"
+        title="הערכת עלות בלבד, מבוססת על מחירון קבוע בקוד שעשוי להשתנות — לא חיוב בפועל."
+      >
+        {isLive ? '~' : ''}
+        {formatUsd(usage.costUsd)} (הערכה)
+      </span>
+    </div>
   );
 }
 
@@ -402,15 +445,22 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
             signal: controller.signal,
             onPhase: (phase) => setCurrentPhase(phase),
             onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
-            onDone: (res) => {
+            onDone: async (res) => {
               setResult(res);
               setStatus('completed');
               stopPolling();
+              // meeting.usage (loaded before the run started) is stale — refetch
+              // so the cost/usage strip reflects the full, authoritative total
+              // the server accumulated throughout the run (C1 in WORKPLAN.md).
+              const fresh = await meetingsApi.get(id).catch(() => null);
+              if (fresh) applyMeeting(fresh);
             },
-            onError: (message) => {
+            onError: async (message) => {
               setRunError(message);
               setStatus('failed');
               stopPolling();
+              const fresh = await meetingsApi.get(id).catch(() => null);
+              if (fresh) applyMeeting(fresh);
             },
           }).then(async () => {
             // Stream ended without a terminal event (mid-stream disconnect) —
@@ -445,6 +495,13 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     for (const p of personas ?? []) map.set(p.id, p);
     return map;
   }, [personas]);
+
+  const liveUsage = useMemo(() => sumTranscriptUsage(transcript), [transcript]);
+  // Once the run has finished, meeting.usage (refetched on completion) is the
+  // authoritative total — it includes the extraction call, which never
+  // produces a transcript entry for liveUsage to sum.
+  const displayUsage =
+    status === 'completed' || status === 'failed' ? (meeting?.usage ?? liveUsage) : liveUsage;
 
   async function handleRetryExtraction() {
     setRetrying(true);
@@ -536,6 +593,10 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
           הפגישה מתקיימת כעת…
         </div>
+      )}
+
+      {(displayUsage.apiCalls > 0 || status === 'completed' || status === 'failed') && (
+        <UsageStrip usage={displayUsage} isLive={isLive} />
       )}
 
       {runError && <ErrorBanner message={runError} />}

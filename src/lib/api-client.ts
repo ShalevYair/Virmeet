@@ -194,16 +194,21 @@ export const meetingsApi = {
 // Meeting run — SSE over a POST fetch stream (spec §6: EventSource cannot POST).
 // ---------------------------------------------------------------------------
 
+/** A single call's raw token usage plus its estimated cost — see src/lib/pricing.ts. */
+export type CallUsageWithCost = NonNullable<TranscriptEntry['usage']>;
+
 export type RunEvent =
   | { type: 'phase'; phase: MeetingPhase }
   | { type: 'entry'; entry: TranscriptEntry }
-  | { type: 'done'; result: MeetingResult }
+  // `usage` is the extraction call's own usage — the only call in a run that
+  // never produces a transcript entry (see runner.ts).
+  | { type: 'done'; result: MeetingResult; usage: CallUsageWithCost }
   | { type: 'error'; message: string };
 
 export interface RunMeetingHandlers {
   onPhase?: (phase: MeetingPhase) => void;
   onEntry?: (entry: TranscriptEntry) => void;
-  onDone?: (result: MeetingResult) => void;
+  onDone?: (result: MeetingResult, usage: CallUsageWithCost) => void;
   onError?: (message: string) => void;
   signal?: AbortSignal;
 }
@@ -274,7 +279,7 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
               handlers.onEntry?.(parsed.entry);
               break;
             case 'done':
-              handlers.onDone?.(parsed.result);
+              handlers.onDone?.(parsed.result, parsed.usage);
               break;
             case 'error':
               handlers.onError?.(parsed.message);

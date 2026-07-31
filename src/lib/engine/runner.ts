@@ -23,10 +23,11 @@ import {
   listPersonas as storeListPersonas,
   updateMeeting as storeUpdateMeeting,
 } from '../store';
+import { estimateCallCostUsd } from '../pricing';
 import { CallBudget } from './budget';
 import * as prompts from './prompts';
 import { EXTRACTION_SCHEMA, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
-import { CallModelFn, OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
+import { CallModelFn, CallUsageWithCost, OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
 
 const defaultDeps: RunMeetingDeps = {
   callModel: realCallModel,
@@ -269,13 +270,18 @@ export async function runMeeting(
     usage = { ...usage, apiCalls: usage.apiCalls + 1 };
   }
 
-  function recordTokens(u: CallModelResult['usage']): void {
+  /** Accumulates one call's tokens into the running meeting total and returns its estimated cost. */
+  function recordUsage(model: string, u: CallModelResult['usage']): CallUsageWithCost {
+    const costUsd = estimateCallCostUsd(model, u);
     usage = {
       ...usage,
       inputTokens: usage.inputTokens + u.inputTokens,
       outputTokens: usage.outputTokens + u.outputTokens,
       cacheReadTokens: usage.cacheReadTokens + u.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens + u.cacheCreationTokens,
+      costUsd: usage.costUsd + costUsd,
     };
+    return { ...u, costUsd };
   }
 
   await persist({ status: 'running', error: null });
@@ -322,7 +328,7 @@ export async function runMeeting(
     }
 
     const result = attempt.value;
-    recordTokens(result.usage);
+    const usageWithCost = recordUsage(persona.model, result.usage);
 
     if (result.refused) {
       await emitEntry(makeEntry('prep', 'system', 'מערכת', prompts.personaRefusedLine(persona.name)));
@@ -346,7 +352,7 @@ export async function runMeeting(
     await emitEntry(
       makeEntry('prep', persona.id, persona.name, text, {
         webSearches: result.webSearches.length ? result.webSearches : undefined,
-        usage: result.usage,
+        usage: usageWithCost,
       })
     );
   }
@@ -369,7 +375,7 @@ export async function runMeeting(
         jsonSchema: OPENING_SCHEMA,
         apiKey,
       });
-      recordTokens(result.usage);
+      const usageWithCost = recordUsage(MODELS.facilitator, result.usage);
 
       if (result.refused) {
         opening = {
@@ -389,7 +395,8 @@ export async function runMeeting(
             'opening',
             'facilitator',
             'מנחה',
-            `${opening.framing}\n\nהתנגשויות שזוהו:\n${conflictsText || '(לא זוהו התנגשויות ממוקדות)'}`
+            `${opening.framing}\n\nהתנגשויות שזוהו:\n${conflictsText || '(לא זוהו התנגשויות ממוקדות)'}`,
+            { usage: usageWithCost }
           )
         );
       }
@@ -442,7 +449,7 @@ export async function runMeeting(
           apiKey,
         });
         budget.record(persona.id);
-        recordTokens(result.usage);
+        const usageWithCost = recordUsage(persona.model, result.usage);
 
         if (result.refused) {
           await emitEntry(
@@ -455,7 +462,7 @@ export async function runMeeting(
           makeEntry('discussion', persona.id, persona.name, result.text, {
             round,
             webSearches: result.webSearches.length ? result.webSearches : undefined,
-            usage: result.usage,
+            usage: usageWithCost,
           })
         );
       } catch (err) {
@@ -486,14 +493,14 @@ export async function runMeeting(
         effort: 'high',
         apiKey,
       });
-      recordTokens(result.usage);
+      const usageWithCost = recordUsage(MODELS.facilitator, result.usage);
 
       if (result.refused) {
         convergenceSummary = '(המנחה סירב לספק סיכום התכנסות; יש להתבסס על התמליל המלא בלבד.)';
         await emitEntry(makeEntry('convergence', 'system', 'מערכת', 'המנחה סירב לספק סיכום התכנסות.'));
       } else {
         convergenceSummary = result.text;
-        await emitEntry(makeEntry('convergence', 'facilitator', 'מנחה', result.text));
+        await emitEntry(makeEntry('convergence', 'facilitator', 'מנחה', result.text, { usage: usageWithCost }));
       }
     } catch (err) {
       convergenceSummary = '(שלב ההתכנסות נכשל; יש להתבסס על התמליל המלא בלבד.)';
@@ -527,14 +534,14 @@ export async function runMeeting(
       apiKey,
       deps.callModel
     );
-    recordTokens(outcome.usage);
+    const usageWithCost = recordUsage(MODELS.facilitator, outcome.usage);
 
     if (!outcome.ok) {
       throw new Error(outcome.error);
     }
 
     await persist({ status: 'completed', result: outcome.result, completedAt: nowIso(), error: null });
-    onEvent({ type: 'done', result: outcome.result });
+    onEvent({ type: 'done', result: outcome.result, usage: usageWithCost });
   } catch (err) {
     const message = errorMessage(err);
     await persist({ status: 'failed', error: message });

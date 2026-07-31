@@ -59,7 +59,13 @@ export interface TranscriptEntry {
   round?: number;
   text: string;
   webSearches?: { query: string }[];
-  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    costUsd: number; // estimate — see src/lib/pricing.ts
+  };
   createdAt: string;
 }
 
@@ -97,7 +103,14 @@ export interface Meeting {
   transcript: TranscriptEntry[];
   result: MeetingResult | null;
   error: string | null;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; apiCalls: number };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+    apiCalls: number;
+    costUsd: number; // estimate — see src/lib/pricing.ts
+  };
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
