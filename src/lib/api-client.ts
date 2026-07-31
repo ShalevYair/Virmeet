@@ -4,6 +4,7 @@
 
 import type {
   AttachedFile,
+  FollowUp,
   Meeting,
   MeetingPhase,
   MeetingResult,
@@ -180,6 +181,15 @@ export const meetingsApi = {
       method: 'DELETE',
     }),
   exportUrl: (id: string, format: 'md' | 'json') => `/api/meetings/${id}/export?format=${format}`,
+  // Personal API key travels only in this header, only to our own route — same pattern as runMeeting() below.
+  askFollowUp: (id: string, input: { personaId: string; question: string }) => {
+    const storedKey = getStoredApiKey();
+    return request<FollowUp>(`/api/meetings/${id}/ask`, {
+      method: 'POST',
+      body: json(input),
+      headers: storedKey ? { 'x-anthropic-api-key': storedKey } : undefined,
+    });
+  },
 };
 
 // ---------------------------------------------------------------------------

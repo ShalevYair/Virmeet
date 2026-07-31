@@ -9,6 +9,7 @@ import {
   runMeeting,
 } from '@/lib/api-client';
 import type {
+  FollowUp,
   Meeting,
   MeetingPhase,
   MeetingResult,
@@ -18,7 +19,7 @@ import type {
 } from '@/lib/types';
 import { MODELS } from '@/lib/types';
 import { estimateTranscriptCostUsd } from '@/lib/pricing';
-import { Badge, Button, buttonClasses, Card, ErrorBanner, Skeleton } from '@/components/ui';
+import { Badge, Button, buttonClasses, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 
@@ -377,6 +378,100 @@ function UsageCard({
   );
 }
 
+function FollowUpPanel({
+  meetingId,
+  participants,
+  followUps,
+  onAsked,
+}: {
+  meetingId: string;
+  participants: Persona[];
+  followUps: FollowUp[];
+  onAsked: (f: FollowUp) => void;
+}) {
+  const options = useMemo(
+    () => [{ id: 'facilitator', name: 'מנחה' }, ...participants.map((p) => ({ id: p.id, name: p.name }))],
+    [participants]
+  );
+  const [personaId, setPersonaId] = useState(options[0]?.id ?? 'facilitator');
+  const [question, setQuestion] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleAsk() {
+    if (!question.trim() || asking) return;
+    setAsking(true);
+    setError(null);
+    try {
+      const followUp = await meetingsApi.askFollowUp(meetingId, { personaId, question: question.trim() });
+      onAsked(followUp);
+      setQuestion('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'שליחת השאלה נכשלה');
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  return (
+    <Card className="flex flex-col gap-4 p-5">
+      <h2 className="text-sm font-semibold">שאלות המשך</h2>
+      {error && <ErrorBanner message={error} />}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <Field label="למי לשאול">
+          <select className={inputClasses} value={personaId} onChange={(e) => setPersonaId(e.target.value)}>
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="flex-1">
+          <Field label="שאלה">
+            <input
+              className={inputClasses}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="לדוגמה: מה לגבי התקציב לרבעון הבא?"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAsk();
+                }
+              }}
+            />
+          </Field>
+        </div>
+        <Button variant="primary" onClick={handleAsk} disabled={asking || !question.trim()}>
+          {asking ? 'שולח…' : 'שלח שאלה'}
+        </Button>
+      </div>
+
+      {followUps.length === 0 ? (
+        <p className="text-sm text-black/55 dark:text-white/55">עדיין לא נשאלו שאלות המשך.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {followUps.map((f) => (
+            <div key={f.id} className="rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
+              <p className="font-medium">{f.personaName}</p>
+              <p className="mt-1 text-black/70 dark:text-white/70">
+                <span className="font-semibold">ש: </span>
+                {f.question}
+              </p>
+              <p className="mt-1 whitespace-pre-wrap">
+                <span className="font-semibold">ת: </span>
+                {f.answer}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function MeetingRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -389,6 +484,7 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
   const [currentPhase, setCurrentPhase] = useState<MeetingPhase>('prep');
   const [status, setStatus] = useState<Meeting['status']>('draft');
   const [result, setResult] = useState<MeetingResult | null>(null);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [rerunOpen, setRerunOpen] = useState(false);
@@ -412,6 +508,7 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     setTranscript(m.transcript);
     setStatus(m.status);
     setResult(m.result);
+    setFollowUps(m.followUps ?? []);
     if (m.transcript.length > 0) {
       setCurrentPhase(m.transcript[m.transcript.length - 1].phase);
     }
@@ -440,6 +537,7 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     if (opts.resetLocal) {
       setTranscript([]);
       setResult(null);
+      setFollowUps([]);
       setRunError(null);
       setCurrentPhase('prep');
     }
@@ -528,9 +626,18 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
       cacheReadTokens += entry.usage.cacheReadTokens;
       apiCalls += 1;
     }
-    const costUsd = estimateTranscriptCostUsd(transcript, modelBySpeakerId);
+    // Follow-up questions (spec §6) count toward the meeting's total consumption too.
+    for (const f of followUps) {
+      if (!f.usage) continue;
+      inputTokens += f.usage.inputTokens;
+      outputTokens += f.usage.outputTokens;
+      cacheReadTokens += f.usage.cacheReadTokens;
+      apiCalls += 1;
+    }
+    const costEntries = [...transcript, ...followUps.map((f) => ({ speakerId: f.personaId, usage: f.usage }))];
+    const costUsd = estimateTranscriptCostUsd(costEntries, modelBySpeakerId);
     return { inputTokens, outputTokens, cacheReadTokens, apiCalls, costUsd };
-  }, [transcript, personas]);
+  }, [transcript, personas, followUps]);
 
   // P5.1 — auto-scroll a live transcript, but only while the user hasn't
   // scrolled away to read something further up (don't yank them mid-read).
@@ -676,6 +783,15 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
       {usageSummary.apiCalls > 0 && <UsageCard {...usageSummary} />}
 
       {status === 'completed' && result && <ResultTabs result={result} />}
+
+      {status === 'completed' && result && (
+        <FollowUpPanel
+          meetingId={id}
+          participants={meeting.participantIds.map((pid) => personaById.get(pid)).filter((p): p is Persona => p != null)}
+          followUps={followUps}
+          onAsked={(f) => setFollowUps((prev) => [...prev, f])}
+        />
+      )}
 
       <ConfirmDialog
         open={cancelOpen}

@@ -2,7 +2,7 @@
 // The disclaimer banner below must be reproduced verbatim, byte-for-byte,
 // as the opening lines of every Markdown export.
 
-import { Meeting, MeetingTask, MODELS, Persona, TranscriptEntry } from '@/lib/types';
+import { FollowUp, Meeting, MeetingTask, MODELS, Persona, TranscriptEntry } from '@/lib/types';
 import { estimateTranscriptCostUsd } from '@/lib/pricing';
 
 export const DISCLAIMER_HE =
@@ -71,7 +71,9 @@ function renderTasksByOwner(tasks: MeetingTask[]): string {
 function renderUsage(meeting: Meeting, personas: Persona[]): string {
   const modelBySpeakerId = new Map<string, string>(personas.map((p) => [p.id, p.model]));
   modelBySpeakerId.set('facilitator', MODELS.facilitator);
-  const costUsd = estimateTranscriptCostUsd(meeting.transcript, modelBySpeakerId);
+  const followUps = meeting.followUps ?? [];
+  const costEntries = [...meeting.transcript, ...followUps.map((f) => ({ speakerId: f.personaId, usage: f.usage }))];
+  const costUsd = estimateTranscriptCostUsd(costEntries, modelBySpeakerId);
   return (
     `מספר קריאות מודל: ${meeting.usage.apiCalls}\n\n` +
     `טוקני קלט: ${meeting.usage.inputTokens}\n\n` +
@@ -79,6 +81,13 @@ function renderUsage(meeting: Meeting, personas: Persona[]): string {
     `טוקני cache: ${meeting.usage.cacheReadTokens}\n\n` +
     `אומדן עלות: $${costUsd.toFixed(3)}`
   );
+}
+
+function renderFollowUps(followUps: FollowUp[]): string {
+  if (followUps.length === 0) return '(לא נשאלו שאלות המשך)';
+  return followUps
+    .map((f) => `**${f.personaName}**\n\nש: ${f.question}\n\nת: ${f.answer}`)
+    .join('\n\n---\n\n');
 }
 
 export function renderMarkdown(meeting: Meeting, personas: Persona[] = []): string {
@@ -124,6 +133,10 @@ export function renderMarkdown(meeting: Meeting, personas: Persona[] = []): stri
         r.modelAssumptions.length ? r.modelAssumptions.map((a) => `- ${a}`).join('\n') : '(אין הנחות מסומנות)'
       }`
     );
+  }
+
+  if (meeting.status === 'completed') {
+    parts.push(`## שאלות המשך\n\n${renderFollowUps(meeting.followUps ?? [])}`);
   }
 
   parts.push(`## צריכה\n\n${renderUsage(meeting, personas)}`);

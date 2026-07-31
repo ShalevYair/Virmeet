@@ -85,6 +85,16 @@ export interface MeetingResult {
   modelAssumptions: string[]; // מה שהמודל השלים בעצמו — מסומן במפורש
 }
 
+export interface FollowUp {
+  id: string;
+  personaId: string; // מזהה פרסונה, או 'facilitator'
+  personaName: string;
+  question: string;
+  answer: string;
+  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number };
+  createdAt: string;
+}
+
 export interface Meeting {
   id: string;
   title: string;
@@ -98,6 +108,9 @@ export interface Meeting {
   result: MeetingResult | null;
   error: string | null;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; apiCalls: number };
+  // אופציונלי לתאימות לאחור: פגישות שנוצרו לפני שלב 6 לא מכילות את השדה
+  // הזה בדיסק — כל קריאה חייבת להתייחס אליו כ-`meeting.followUps ?? []`.
+  followUps?: FollowUp[];
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

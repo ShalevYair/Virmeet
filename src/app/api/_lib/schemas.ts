@@ -46,6 +46,11 @@ export const meetingCreateSchema = z.object({
 // PATCH on a meeting is intentionally restricted to pre-run editable fields
 // plus a cancel transition — `.strict()` rejects attempts to smuggle in
 // transcript/result/usage/status:'completed' etc. through the client.
+export const askFollowUpSchema = z.object({
+  personaId: z.string().min(1),
+  question: z.string().min(1),
+});
+
 export const meetingUpdateSchema = z
   .object({
     title: z.string().min(1),

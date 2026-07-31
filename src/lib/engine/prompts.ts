@@ -8,7 +8,7 @@
 // a persona's repeated calls in the same meeting. Do not fold per-phase or
 // per-round content into the system blocks.
 
-import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
+import { FollowUp, Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { SystemBlock } from '../anthropic';
 import { OpeningOutput, PrepOutput } from './types';
 
@@ -284,6 +284,47 @@ conflicts, risks, tasks, modelAssumptions.
 - כל דבר שאתה, המנחה, השלמת בעצמך ולא נאמר במפורש בדיון (הנחת עבודה, פרשנות,
   השלמת פרט חסר) — ציין אותו במפורש ברשימת modelAssumptions. אל תשלב השלמות
   כאלה בשקט בתוך summary/decisions/tasks בלי לסמן אותן גם שם.`;
+}
+
+// ---------------------------------------------------------------------------
+// Post-meeting follow-up questions (spec §6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Uses the exact same system blocks as the persona's live-meeting calls
+ * (§3.2, cache stability) — the caller passes `buildPersonaSystemBlocks(org,
+ * persona)` or `buildFacilitatorSystemBlocks(org)` alongside this message.
+ */
+export function buildFollowUpUserMessage(
+  meeting: Meeting,
+  meetingTypes: MeetingType[],
+  transcript: TranscriptEntry[],
+  previousFollowUps: FollowUp[],
+  question: string
+): string {
+  const previousQA = previousFollowUps.length
+    ? previousFollowUps.map((f, i) => `${i + 1}. ש: ${f.question}\n   ת: ${f.answer}`).join('\n\n')
+    : '(אין שאלות המשך קודמות בפגישה זו)';
+
+  return `${meetingHeaderBlock(meeting, meetingTypes)}
+
+# תמליל הפגישה המלא (הפגישה כבר הסתיימה)
+${formatTranscript(transcript)}
+
+# שאלות המשך קודמות שנשאלת באותה פגישה
+${previousQA}
+
+# המשימה שלך עכשיו
+
+הפגישה הסתיימה. מישהו שואל אותך שאלת המשך, מחוץ למסגרת הפגישה עצמה. ענה
+מנקודת המבט שלך בלבד, בהתבסס אך ורק על מה שנאמר בפועל בתמליל למעלה ועל
+הידע שיש לך מהפרומפט האישי שלך.
+- אם התשובה דורשת מידע שאין לך — אמור זאת במפורש ("אין לי את המידע הזה,
+  צריך לבדוק מול X"). זו תשובה טובה ולגיטימית, לא כישלון.
+- אל תמציא עובדות או החלטות שלא נאמרו בתמליל.
+- ענה בטקסט חופשי בלבד (לא JSON, בלי כותרות), עד כ-150 מילה.
+
+השאלה: ${question}`;
 }
 
 // ---------------------------------------------------------------------------
