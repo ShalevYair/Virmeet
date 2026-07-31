@@ -31,6 +31,9 @@ export async function POST(req: Request, { params }: RouteContext) {
   if (meeting.status === 'completed') {
     return jsonError('הפגישה כבר הושלמה — אי אפשר להריץ אותה שוב.', 409);
   }
+  if (meeting.status === 'cancelled') {
+    return jsonError('הפגישה בוטלה — אי אפשר להריץ אותה שוב.', 409);
+  }
   if (meeting.participantIds.length < 2) {
     return jsonError('נדרשים לפחות שני משתתפים כדי להריץ את הפגישה.', 400);
   }

@@ -389,6 +389,53 @@ describe('runMeeting', () => {
     expect(distinctHeaderTexts.size).toBe(1);
   });
 
+  it('stops promptly once cancelled mid-discussion, preserving the transcript and making no further calls', async () => {
+    const a = makePersona({ name: 'פרסונה א', model: 'model-a' });
+    const b = makePersona({ name: 'פרסונה ב', model: 'model-b' });
+    const mt = makeMeetingType();
+    const meeting = makeMeeting([a.id, b.id], [mt.id], { discussionRounds: 3 });
+
+    let current = meeting;
+    let discussionCalls = 0;
+    const callModel = async (opts: CallModelOptions): Promise<CallModelResult> => {
+      const isDiscussionCall = !opts.jsonSchema && (opts.model === 'model-a' || opts.model === 'model-b');
+      if (isDiscussionCall) {
+        discussionCalls += 1;
+        if (discussionCalls === 2) {
+          // Simulate the user's cancel PATCH landing right as round 1 finishes.
+          current = { ...current, status: 'cancelled' };
+        }
+      }
+      return happyPathCallModel(a.name)(opts);
+    };
+
+    const deps: RunMeetingDeps = {
+      callModel,
+      updateMeeting: async (_id, patch) => {
+        current = { ...current, ...patch };
+        return current;
+      },
+      getMeeting: async () => current,
+      getPersonas: async () => [a, b],
+      getMeetingTypes: async () => [mt],
+      getOrgSettings: async () => makeOrg(),
+    };
+
+    await run(deps, meeting.id);
+
+    expect(current.status).toBe('cancelled');
+    // Only round 1 (both personas) got through before cancellation was noticed.
+    expect(discussionCalls).toBe(2);
+    const discussionSpeakerEntries = current.transcript.filter(
+      (e) => e.phase === 'discussion' && (e.speakerId === a.id || e.speakerId === b.id)
+    );
+    expect(discussionSpeakerEntries).toHaveLength(2);
+    expect(current.transcript.some((e) => e.speakerId === 'system' && e.text.includes('בוטלה'))).toBe(true);
+    // No convergence/extraction entries — the run stopped, it didn't just skip ahead.
+    expect(current.transcript.some((e) => e.phase === 'convergence')).toBe(false);
+    expect(current.result).toBeNull();
+  });
+
   it('refuses to run with fewer than two participants and makes no model calls', async () => {
     const a = makePersona({ name: 'פרסונה א', model: 'model-a' });
     const mt = makeMeetingType();

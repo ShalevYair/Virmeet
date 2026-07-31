@@ -158,7 +158,25 @@ export async function runMeeting(
 
   async function emitPhase(phase: PhaseName): Promise<void> {
     onEvent({ type: 'phase', phase });
-    await persist({ status: 'running' });
+    // Deliberately does NOT patch `status`: it's set once, up front, before
+    // phase 0 starts. Writing 'running' here on every phase transition used
+    // to clobber a 'cancelled' status set concurrently by the user's cancel
+    // request (A2 in WORKPLAN.md).
+    await persist();
+  }
+
+  /**
+   * Polled between phases and between discussion turns. If the user's cancel
+   * request has landed (status flipped to 'cancelled' by the PATCH the UI
+   * sends), logs it and stops the run — the transcript accumulated so far has
+   * already been persisted throughout.
+   */
+  async function checkCancelled(phase: PhaseName): Promise<boolean> {
+    const current = await deps.getMeeting(meetingId);
+    if (current?.status !== 'cancelled') return false;
+    await emitEntry(makeEntry(phase, 'system', 'מערכת', 'הפגישה בוטלה על ידי המשתמש.'));
+    onEvent({ type: 'error', message: 'הפגישה בוטלה על ידי המשתמש.' });
+    return true;
   }
 
   function recordApiCall(): void {
@@ -180,6 +198,7 @@ export async function runMeeting(
   // Phase 0 — prep (parallel, no visibility into other personas' output)
   // -------------------------------------------------------------------
   await emitPhase('prep');
+  if (await checkCancelled('prep')) return;
   const prepResults = new Map<string, PrepOutput>();
 
   const prepAttempts = await Promise.allSettled(
@@ -250,6 +269,7 @@ export async function runMeeting(
   // Phase 1 — opening (facilitator, single call)
   // -------------------------------------------------------------------
   await emitPhase('opening');
+  if (await checkCancelled('opening')) return;
   let opening: OpeningOutput = { framing: '', conflicts: [] };
   {
     recordApiCall();
@@ -307,10 +327,12 @@ export async function runMeeting(
   // Phase 2 — discussion (N rounds, sequential turns)
   // -------------------------------------------------------------------
   await emitPhase('discussion');
+  if (await checkCancelled('discussion')) return;
   const totalRounds = meeting.discussionRounds;
 
   for (let round = 1; round <= totalRounds; round++) {
     for (const persona of participants) {
+      if (await checkCancelled('discussion')) return;
       if (!budget.canCall(persona.id)) {
         if (budget.shouldAnnounceExhausted(persona.id)) {
           await emitEntry(
@@ -365,6 +387,7 @@ export async function runMeeting(
   // Phase 3 — convergence (facilitator, single call)
   // -------------------------------------------------------------------
   await emitPhase('convergence');
+  if (await checkCancelled('convergence')) return;
   let convergenceSummary = '';
   {
     recordApiCall();
@@ -405,6 +428,7 @@ export async function runMeeting(
   // The transcript accumulated above has already been persisted throughout.
   // -------------------------------------------------------------------
   await emitPhase('extraction');
+  if (await checkCancelled('extraction')) return;
   try {
     recordApiCall();
     const result = await deps.callModel({
