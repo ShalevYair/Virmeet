@@ -16,8 +16,37 @@ export function validateId(id: string): NextResponse | null {
   return idSchema.safeParse(id).success ? null : jsonError('מזהה לא תקין.', 400);
 }
 
+// zod issue paths are English field names (schemas.ts) — never show those to
+// the user (invariant #5: every user-facing error is Hebrew). Keyed on the
+// path's first segment so array-item paths (e.g. ['meetingTypeIds', 0])
+// still resolve via the field name.
+const FIELD_LABELS_HE: Record<string, string> = {
+  title: 'כותרת',
+  objective: 'מטרת הפגישה',
+  participantIds: 'משתתפים',
+  meetingTypeIds: 'סוג/י פגישה',
+  discussionRounds: 'מספר סבבי דיון',
+  status: 'סטטוס',
+  name: 'שם',
+  role: 'תפקיד',
+  organization: 'ארגון',
+  color: 'צבע',
+  prompt: 'פרומפט',
+  model: 'מודל',
+  webAccess: 'גישה לרשת',
+  maxApiCalls: 'מכסת קריאות מודל',
+  maxWebSearches: 'מכסת חיפושי רשת',
+  isActive: 'פעיל',
+  shortDescription: 'תיאור קצר',
+  organizationName: 'שם הארגון',
+  description: 'תיאור',
+  constraints: 'אילוצים',
+};
+
 function fieldLabel(path: (string | number)[]): string {
-  return path.length ? path.map(String).join('.') : 'קלט';
+  const key = path[0];
+  if (typeof key === 'string' && key in FIELD_LABELS_HE) return FIELD_LABELS_HE[key];
+  return 'הקלט';
 }
 
 /** Renders a single zod issue as a Hebrew-only sentence — never echoes the English default message. */
