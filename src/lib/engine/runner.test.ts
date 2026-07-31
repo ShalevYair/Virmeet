@@ -317,6 +317,47 @@ describe('runMeeting', () => {
     expect(errorEvent).toBeDefined();
   });
 
+  it('sends the meeting header as its own cached content block, identical across every call', async () => {
+    const a = makePersona({ name: 'פרסונה א', model: 'model-a' });
+    const b = makePersona({ name: 'פרסונה ב', model: 'model-b' });
+    const mt = makeMeetingType();
+    const meeting = makeMeeting([a.id, b.id], [mt.id], {
+      files: [
+        {
+          id: randomUUID(),
+          name: 'רקע.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 10,
+          storedPath: 'uploads/x',
+          extractedText: 'תוכן קובץ הרקע המשותף',
+          addedAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const seenHeaders: unknown[] = [];
+    const callModel = async (opts: CallModelOptions): Promise<CallModelResult> => {
+      const content = opts.messages[0]?.content;
+      if (Array.isArray(content)) seenHeaders.push(content[0]);
+      return happyPathCallModel(a.name)(opts);
+    };
+
+    const { deps } = makeDeps(meeting, [a, b], [mt], callModel);
+    await run(deps, meeting.id);
+
+    // prep(2) + opening(1) + discussion(2) + convergence(1) + extraction(1) = 7 calls.
+    expect(seenHeaders).toHaveLength(7);
+    for (const header of seenHeaders) {
+      expect(header).toMatchObject({
+        type: 'text',
+        cache_control: { type: 'ephemeral' },
+      });
+      expect((header as { text: string }).text).toContain('תוכן קובץ הרקע המשותף');
+    }
+    const distinctHeaderTexts = new Set(seenHeaders.map((h) => (h as { text: string }).text));
+    expect(distinctHeaderTexts.size).toBe(1);
+  });
+
   it('refuses to run with fewer than two participants and makes no model calls', async () => {
     const a = makePersona({ name: 'פרסונה א', model: 'model-a' });
     const mt = makeMeetingType();

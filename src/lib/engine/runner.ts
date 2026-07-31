@@ -15,7 +15,7 @@ import {
   TranscriptEntry,
 } from '../types';
 import { MODELS } from '../types';
-import { callModel as realCallModel, CallModelResult } from '../anthropic';
+import { callModel as realCallModel, CallModelMessage, CallModelResult } from '../anthropic';
 import {
   getMeeting as storeGetMeeting,
   getOrgSettings as storeGetOrgSettings,
@@ -116,6 +116,21 @@ export async function runMeeting(
 
   const org: OrgSettings = await deps.getOrgSettings();
 
+  // Identical byte-for-byte across every call below (A1 in WORKPLAN.md): sent
+  // as its own leading content block with cache_control so the cached prefix
+  // extends past the system blocks to cover meeting.files too, instead of
+  // re-sending shared background files uncached on every single call.
+  const headerBlock = prompts.meetingHeaderBlock(meeting, meetingTypes);
+  function userMessage(rest: string): CallModelMessage {
+    return {
+      role: 'user',
+      content: [
+        { type: 'text', text: headerBlock, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: rest },
+      ],
+    };
+  }
+
   // Mutable run state. `meeting` above stays a read-only snapshot of the
   // fields that don't change during a run (title/objective/files/rounds) —
   // everything that *does* change lives in these locals.
@@ -167,7 +182,7 @@ export async function runMeeting(
         const result = await deps.callModel({
           model: persona.model,
           system: prompts.buildPersonaSystemBlocks(org, persona),
-          messages: [{ role: 'user', content: prompts.buildPrepUserMessage(meeting, meetingTypes) }],
+          messages: [userMessage(prompts.buildPrepUserMessage())],
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
           jsonSchema: PREP_SCHEMA,
@@ -235,12 +250,7 @@ export async function runMeeting(
       const result = await deps.callModel({
         model: MODELS.facilitator,
         system: prompts.buildFacilitatorSystemBlocks(org),
-        messages: [
-          {
-            role: 'user',
-            content: prompts.buildOpeningUserMessage(meeting, meetingTypes, participants, prepResults),
-          },
-        ],
+        messages: [userMessage(prompts.buildOpeningUserMessage(participants, prepResults))],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
@@ -309,18 +319,7 @@ export async function runMeeting(
           model: persona.model,
           system: prompts.buildPersonaSystemBlocks(org, persona),
           messages: [
-            {
-              role: 'user',
-              content: prompts.buildDiscussionUserMessage(
-                meeting,
-                meetingTypes,
-                persona,
-                round,
-                totalRounds,
-                opening,
-                transcript
-              ),
-            },
+            userMessage(prompts.buildDiscussionUserMessage(persona, round, totalRounds, opening, transcript)),
           ],
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
@@ -366,9 +365,7 @@ export async function runMeeting(
       const result = await deps.callModel({
         model: MODELS.facilitator,
         system: prompts.buildFacilitatorSystemBlocks(org),
-        messages: [
-          { role: 'user', content: prompts.buildConvergenceUserMessage(meeting, meetingTypes, transcript) },
-        ],
+        messages: [userMessage(prompts.buildConvergenceUserMessage(transcript))],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         apiKey,
@@ -407,10 +404,7 @@ export async function runMeeting(
       model: MODELS.facilitator,
       system: prompts.buildFacilitatorSystemBlocks(org),
       messages: [
-        {
-          role: 'user',
-          content: prompts.buildExtractionUserMessage(meeting, meetingTypes, participants, transcript, convergenceSummary),
-        },
+        userMessage(prompts.buildExtractionUserMessage(participants, transcript, convergenceSummary)),
       ],
       maxTokens: REGULAR_MAX_TOKENS,
       effort: 'high',

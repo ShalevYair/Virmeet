@@ -93,7 +93,13 @@ function meetingTypesBlock(meetingTypes: MeetingType[]): string {
     .join('\n\n');
 }
 
-function meetingHeaderBlock(meeting: Meeting, meetingTypes: MeetingType[]): string {
+/**
+ * Identical byte-for-byte across every call of the same meeting run. Callers
+ * (runner.ts) send this as its own leading content block with cache_control
+ * so it extends the cached prefix beyond the system blocks — see A1 in
+ * WORKPLAN.md. Do not fold per-phase content into it.
+ */
+export function meetingHeaderBlock(meeting: Meeting, meetingTypes: MeetingType[]): string {
   return `# הפגישה
 
 כותרת: ${meeting.title}
@@ -128,10 +134,9 @@ function formatConflicts(conflicts: OpeningOutput['conflicts']): string {
 // Phase 0 — prep (parallel, no visibility into other personas' output)
 // ---------------------------------------------------------------------------
 
-export function buildPrepUserMessage(meeting: Meeting, meetingTypes: MeetingType[]): string {
-  return `${meetingHeaderBlock(meeting, meetingTypes)}
-
-# המשימה שלך עכשיו
+/** The varying suffix that follows meetingHeaderBlock() in the prep user message. */
+export function buildPrepUserMessage(): string {
+  return `# המשימה שלך עכשיו
 
 זו הכנה פרטית לפגישה — אף משתתף אחר לא רואה את מה שאתה כותב כאן, וגם אתה לא רואה
 את מה שהם כותבים. ענה אך ורק מנקודת המבט שלך, בלי לנחש מה אחרים יגידו ובלי לנסות
@@ -145,9 +150,8 @@ export function buildPrepUserMessage(meeting: Meeting, meetingTypes: MeetingType
 // Phase 1 — opening (facilitator, single call)
 // ---------------------------------------------------------------------------
 
+/** The varying suffix that follows meetingHeaderBlock() in the opening user message. */
 export function buildOpeningUserMessage(
-  meeting: Meeting,
-  meetingTypes: MeetingType[],
   participants: Persona[],
   prepResults: Map<string, PrepOutput>
 ): string {
@@ -164,9 +168,7 @@ export function buildOpeningUserMessage(
     })
     .join('\n\n');
 
-  return `${meetingHeaderBlock(meeting, meetingTypes)}
-
-# הכנה פרטית שכל משתתף הגיש (לפני שראה את האחרים)
+  return `# הכנה פרטית שכל משתתף הגיש (לפני שראה את האחרים)
 
 ${prepBlock}
 
@@ -184,18 +186,15 @@ ${prepBlock}
 // Phase 2 — discussion (N rounds, sequential turns)
 // ---------------------------------------------------------------------------
 
+/** The varying suffix that follows meetingHeaderBlock() in the discussion user message. */
 export function buildDiscussionUserMessage(
-  meeting: Meeting,
-  meetingTypes: MeetingType[],
   persona: Persona,
   round: number,
   totalRounds: number,
   opening: OpeningOutput,
   transcriptSoFar: TranscriptEntry[]
 ): string {
-  return `${meetingHeaderBlock(meeting, meetingTypes)}
-
-# מסגור הפגישה (מהמנחה)
+  return `# מסגור הפגישה (מהמנחה)
 ${opening.framing}
 
 # ההתנגשויות שזוהו
@@ -220,14 +219,9 @@ ${formatTranscript(transcriptSoFar)}
 // Phase 3 — convergence (facilitator, single call)
 // ---------------------------------------------------------------------------
 
-export function buildConvergenceUserMessage(
-  meeting: Meeting,
-  meetingTypes: MeetingType[],
-  transcript: TranscriptEntry[]
-): string {
-  return `${meetingHeaderBlock(meeting, meetingTypes)}
-
-# תמליל הדיון המלא
+/** The varying suffix that follows meetingHeaderBlock() in the convergence user message. */
+export function buildConvergenceUserMessage(transcript: TranscriptEntry[]): string {
+  return `# תמליל הדיון המלא
 ${formatTranscript(transcript)}
 
 # המשימה שלך עכשיו
@@ -240,17 +234,14 @@ ${formatTranscript(transcript)}
 // Phase 4 — extraction (facilitator, single call, structured output)
 // ---------------------------------------------------------------------------
 
+/** The varying suffix that follows meetingHeaderBlock() in the extraction user message. */
 export function buildExtractionUserMessage(
-  meeting: Meeting,
-  meetingTypes: MeetingType[],
   participants: Persona[],
   transcript: TranscriptEntry[],
   convergenceSummary: string
 ): string {
   const participantsList = participants.map((p) => `- ${p.name} (${p.role})`).join('\n');
-  return `${meetingHeaderBlock(meeting, meetingTypes)}
-
-# משתתפים
+  return `# משתתפים
 ${participantsList}
 
 # תמליל הדיון המלא
