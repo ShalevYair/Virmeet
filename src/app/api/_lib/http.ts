@@ -10,8 +10,38 @@ export function jsonError(message: string, status: number): NextResponse {
   return NextResponse.json({ error: message }, { status });
 }
 
+/** Hebrew display names for every field validated by schemas in _lib/schemas.ts. */
+const FIELD_LABELS_HE: Record<string, string> = {
+  // meetings
+  title: 'כותרת',
+  objective: 'מה רוצים להשיג',
+  meetingTypeIds: 'סוג הפגישה',
+  participantIds: 'משתתפים',
+  discussionRounds: 'מספר סבבי דיון',
+  status: 'סטטוס',
+  // personas
+  name: 'שם',
+  role: 'תפקיד',
+  organization: 'ארגון',
+  color: 'צבע',
+  prompt: 'פרומפט',
+  model: 'מודל',
+  webAccess: 'גישה לרשת',
+  maxApiCalls: 'תקציב קריאות',
+  maxWebSearches: 'תקציב חיפושי רשת',
+  isActive: 'פעיל',
+  // meeting types
+  shortDescription: 'תיאור קצר',
+  // org settings
+  organizationName: 'שם הארגון',
+  description: 'תיאור',
+  constraints: 'אילוצים',
+};
+
 function fieldLabel(path: (string | number)[]): string {
-  return path.length ? path.map(String).join('.') : 'קלט';
+  if (path.length === 0) return 'קלט';
+  const key = String(path[path.length - 1]);
+  return FIELD_LABELS_HE[key] ?? path.map(String).join('.');
 }
 
 /** Renders a single zod issue as a Hebrew-only sentence — never echoes the English default message. */

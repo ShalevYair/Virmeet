@@ -53,6 +53,11 @@ const PRIORITY_TONE: Record<MeetingTask['priority'], 'danger' | 'warning' | 'neu
 
 const FACILITATOR_COLOR = '#334155';
 
+// Mirrors STALE_RUN_MS in src/app/api/meetings/[id]/run/route.ts — used only
+// to decide whether to offer "run again" in the UI; the server is the
+// authority that actually allows the re-run.
+const STALE_RUN_MS = 5 * 60_000;
+
 function DisclaimerBanner() {
   return (
     <div
@@ -341,6 +346,8 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
   const [result, setResult] = useState<MeetingResult | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -381,6 +388,48 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     }, 2500);
   }
 
+  function beginRun(opts: { resetLocal?: boolean } = {}) {
+    hasStartedRef.current = true;
+    if (opts.resetLocal) {
+      setTranscript([]);
+      setResult(null);
+      setRunError(null);
+      setCurrentPhase('prep');
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setStatus('running');
+    return runMeeting(id, {
+      signal: controller.signal,
+      onPhase: (phase) => setCurrentPhase(phase),
+      onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
+      onDone: (res) => {
+        setResult(res);
+        setStatus('completed');
+        stopPolling();
+      },
+      onError: (message) => {
+        setRunError(message);
+        setStatus('failed');
+        stopPolling();
+      },
+      onCancelled: () => {
+        setStatus('cancelled');
+        stopPolling();
+      },
+    }).then(async () => {
+      // Stream ended without a terminal event (mid-stream disconnect) —
+      // reconcile with the server via polling instead of guessing.
+      const fresh = await meetingsApi.get(id).catch(() => null);
+      if (fresh && (fresh.status === 'completed' || fresh.status === 'failed' || fresh.status === 'cancelled')) {
+        applyMeeting(fresh);
+      } else if (fresh && fresh.status === 'running') {
+        applyMeeting(fresh);
+        startPolling();
+      }
+    });
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoadError(null);
@@ -391,38 +440,11 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
         setPersonas(people);
 
         if (m.status === 'draft' && !hasStartedRef.current) {
-          hasStartedRef.current = true;
-          const controller = new AbortController();
-          abortRef.current = controller;
-          setStatus('running');
-          runMeeting(id, {
-            signal: controller.signal,
-            onPhase: (phase) => setCurrentPhase(phase),
-            onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
-            onDone: (res) => {
-              setResult(res);
-              setStatus('completed');
-              stopPolling();
-            },
-            onError: (message) => {
-              setRunError(message);
-              setStatus('failed');
-              stopPolling();
-            },
-          }).then(async () => {
-            // Stream ended without a terminal event (mid-stream disconnect) —
-            // reconcile with the server via polling instead of guessing.
-            const fresh = await meetingsApi.get(id).catch(() => null);
-            if (fresh && (fresh.status === 'completed' || fresh.status === 'failed' || fresh.status === 'cancelled')) {
-              applyMeeting(fresh);
-            } else if (fresh && fresh.status === 'running') {
-              applyMeeting(fresh);
-              startPolling();
-            }
-          });
+          beginRun();
         } else if (m.status === 'running') {
           // A run is already in progress (e.g. page reload) — this session did
-          // not open the stream, so fall back to polling for updates.
+          // not open the stream, so fall back to polling for updates. If it
+          // turns out to be stale, the polled meeting.updatedAt will show it.
           startPolling();
         }
       })
@@ -457,6 +479,27 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
       setCancelOpen(false);
     }
   }
+
+  async function handleRerun() {
+    setRerunning(true);
+    stopPolling();
+    try {
+      await beginRun({ resetLocal: true });
+    } catch (err) {
+      setRunError(err instanceof ApiError ? err.message : 'הרצה מחדש נכשלה');
+      setStatus('failed');
+    } finally {
+      setRerunning(false);
+      setRerunOpen(false);
+    }
+  }
+
+  const isStaleRunning =
+    status === 'running' &&
+    !hasStartedRef.current &&
+    meeting != null &&
+    Date.now() - Date.parse(meeting.updatedAt) > STALE_RUN_MS;
+  const canRerun = status === 'failed' || status === 'cancelled' || isStaleRunning;
 
   if (loadError) {
     return (
@@ -496,6 +539,11 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
               בטל פגישה
             </Button>
           )}
+          {canRerun && (
+            <Button variant="primary" onClick={() => setRerunOpen(true)}>
+              הרץ שוב
+            </Button>
+          )}
           {status === 'completed' && result && (
             <>
               <a href={meetingsApi.exportUrl(id, 'md')} download>
@@ -511,12 +559,17 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
 
       <PhaseRail current={currentPhase} status={status} />
 
-      {status === 'running' && (
+      {status === 'running' && !isStaleRunning && (
         <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-400">
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
           הפגישה מתקיימת כעת…
         </div>
       )}
+
+      {isStaleRunning && (
+        <ErrorBanner message="הרצה קודמת הופסקה (כנראה עקב תקלה בשרת) ולא הושלמה. ניתן להריץ את הפגישה מחדש." />
+      )}
+      {status === 'cancelled' && <ErrorBanner message="הפגישה בוטלה על ידי המשתמש." />}
 
       {runError && <ErrorBanner message={runError} />}
 
@@ -543,6 +596,16 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
         busy={cancelling}
         onConfirm={handleCancel}
         onCancel={() => setCancelOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={rerunOpen}
+        title="להריץ את הפגישה מחדש?"
+        description="התמליל והתוצאות הקיימים יימחקו, והפגישה תתחיל מחדש מהשלב הראשון."
+        confirmLabel="הרץ שוב"
+        busy={rerunning}
+        onConfirm={handleRerun}
+        onCancel={() => setRerunOpen(false)}
       />
     </div>
   );

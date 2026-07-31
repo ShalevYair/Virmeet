@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deleteMeeting, getMeeting, listMeetingTypes, listPersonas, updateMeeting } from '@/lib/store';
+import { abortRun } from '@/lib/engine/run-registry';
 import { internalError, jsonError, parseJsonBody } from '../../_lib/http';
 import { meetingUpdateSchema } from '../../_lib/schemas';
 
@@ -48,6 +49,12 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       if (unknownType) {
         return jsonError(`סוג הפגישה שנבחר (${unknownType}) אינו קיים.`, 400);
       }
+    }
+
+    if (patch.status === 'cancelled') {
+      // Abort a call already in flight in this process immediately, instead
+      // of waiting for runMeeting()'s next store-backed cancellation check.
+      abortRun(id);
     }
 
     const updated = await updateMeeting(id, patch);

@@ -12,7 +12,8 @@ export type MeetingEvent =
   | { type: 'phase'; phase: PhaseName }
   | { type: 'entry'; entry: TranscriptEntry }
   | { type: 'done'; result: MeetingResult }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'cancelled' };
 
 export type OnEvent = (event: MeetingEvent) => void;
 

@@ -6,6 +6,7 @@
 // schemas.ts for the structured-output JSON schemas.
 
 import { randomUUID } from 'crypto';
+import Anthropic from '@anthropic-ai/sdk';
 import {
   Meeting,
   MeetingResult,
@@ -43,7 +44,26 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Maps SDK/network errors to a Hebrew sentence for the transcript — never surfaces raw SDK text. */
 function errorMessage(err: unknown): string {
+  if (err instanceof Anthropic.APIConnectionTimeoutError) {
+    return 'הקריאה למודל חרגה מזמן ההמתנה המותר.';
+  }
+  if (err instanceof Anthropic.RateLimitError) {
+    return 'ספק המודל מוגבל כרגע בקצב הבקשות (Rate Limit).';
+  }
+  if (err instanceof Anthropic.InternalServerError) {
+    return 'שגיאת שרת זמנית אצל ספק המודל.';
+  }
+  if (err instanceof Anthropic.APIConnectionError) {
+    return 'שגיאת תקשורת בקריאה לספק המודל.';
+  }
+  if (err instanceof Anthropic.AuthenticationError) {
+    return 'מפתח ה-API של Anthropic אינו תקין או נדחה.';
+  }
+  if (err instanceof Anthropic.APIError) {
+    return `שגיאה מספק המודל (קוד ${err.status ?? 'לא ידוע'}).`;
+  }
   if (err instanceof Error) return err.message;
   return String(err);
 }
@@ -82,12 +102,18 @@ function makeEntry(
  * x-anthropic-api-key header — is forwarded to every model call below and
  * nowhere else: it is never added to `meeting`, `transcript`, or any
  * persisted patch, so it can't reach data/ or the exported transcript.
+ *
+ * `signal` — aborts a model call already in flight the moment the run route
+ * aborts it (see run-registry.ts). Cancellation is otherwise detected by
+ * re-reading `meeting.status` from the store at the head of every phase and
+ * before every discussion turn, so it also works across process restarts.
  */
 export async function runMeeting(
   meetingId: string,
   onEvent: OnEvent,
   overrideDeps: Partial<RunMeetingDeps> = {},
-  apiKey?: string
+  apiKey?: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const deps: RunMeetingDeps = { ...defaultDeps, ...overrideDeps };
 
@@ -134,9 +160,32 @@ export async function runMeeting(
     await persist();
   }
 
+  let currentPhase: PhaseName = 'prep';
+
   async function emitPhase(phase: PhaseName): Promise<void> {
+    currentPhase = phase;
     onEvent({ type: 'phase', phase });
+    // Never resurrect a meeting the user already cancelled (P1.1 §3).
+    const fresh = await deps.getMeeting(meetingId);
+    if (fresh?.status === 'cancelled') return;
     await persist({ status: 'running' });
+  }
+
+  /**
+   * Authoritative, store-backed cancellation check. If the meeting was
+   * cancelled (via PATCH, from any process), records a system line, persists
+   * `status:'cancelled'`, emits the cancelled event, and returns true so the
+   * caller can `return` out of runMeeting immediately.
+   */
+  async function bailIfCancelled(): Promise<boolean> {
+    const fresh = await deps.getMeeting(meetingId);
+    if (fresh?.status !== 'cancelled') return false;
+    const entry = makeEntry(currentPhase, 'system', 'מערכת', 'הפגישה בוטלה על ידי המשתמש.');
+    transcript = [...transcript, entry];
+    onEvent({ type: 'entry', entry });
+    await deps.updateMeeting(meetingId, { transcript, usage });
+    onEvent({ type: 'cancelled' });
+    return true;
   }
 
   function recordApiCall(): void {
@@ -158,6 +207,7 @@ export async function runMeeting(
   // Phase 0 — prep (parallel, no visibility into other personas' output)
   // -------------------------------------------------------------------
   await emitPhase('prep');
+  if (await bailIfCancelled()) return;
   const prepResults = new Map<string, PrepOutput>();
 
   const prepAttempts = await Promise.allSettled(
@@ -173,6 +223,7 @@ export async function runMeeting(
           jsonSchema: PREP_SCHEMA,
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
           apiKey,
+          signal,
         });
         return result;
       } finally {
@@ -180,6 +231,8 @@ export async function runMeeting(
       }
     })
   );
+
+  if (await bailIfCancelled()) return;
 
   // Process in participant order (not settle order) so the transcript reads
   // deterministically even though the calls above ran concurrently.
@@ -228,6 +281,7 @@ export async function runMeeting(
   // Phase 1 — opening (facilitator, single call)
   // -------------------------------------------------------------------
   await emitPhase('opening');
+  if (await bailIfCancelled()) return;
   let opening: OpeningOutput = { framing: '', conflicts: [] };
   {
     recordApiCall();
@@ -245,6 +299,7 @@ export async function runMeeting(
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
         apiKey,
+        signal,
       });
       recordTokens(result.usage);
 
@@ -271,6 +326,7 @@ export async function runMeeting(
         );
       }
     } catch (err) {
+      if (await bailIfCancelled()) return;
       opening = {
         framing: 'שלב הפתיחה נכשל — הדיון ימשיך ללא מסגור מהמנחה, ישירות מתוך שלב ההכנה.',
         conflicts: [],
@@ -290,10 +346,13 @@ export async function runMeeting(
   // Phase 2 — discussion (N rounds, sequential turns)
   // -------------------------------------------------------------------
   await emitPhase('discussion');
+  if (await bailIfCancelled()) return;
   const totalRounds = meeting.discussionRounds;
 
   for (let round = 1; round <= totalRounds; round++) {
     for (const persona of participants) {
+      if (await bailIfCancelled()) return;
+
       if (!budget.canCall(persona.id)) {
         if (budget.shouldAnnounceExhausted(persona.id)) {
           await emitEntry(
@@ -326,6 +385,7 @@ export async function runMeeting(
           effort: 'medium',
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
           apiKey,
+          signal,
         });
         budget.record(persona.id);
         recordTokens(result.usage);
@@ -346,6 +406,7 @@ export async function runMeeting(
         );
       } catch (err) {
         budget.record(persona.id);
+        if (await bailIfCancelled()) return;
         await emitEntry(
           makeEntry('discussion', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(err)), {
             round,
@@ -359,6 +420,7 @@ export async function runMeeting(
   // Phase 3 — convergence (facilitator, single call)
   // -------------------------------------------------------------------
   await emitPhase('convergence');
+  if (await bailIfCancelled()) return;
   let convergenceSummary = '';
   {
     recordApiCall();
@@ -372,6 +434,7 @@ export async function runMeeting(
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         apiKey,
+        signal,
       });
       recordTokens(result.usage);
 
@@ -383,6 +446,7 @@ export async function runMeeting(
         await emitEntry(makeEntry('convergence', 'facilitator', 'מנחה', result.text));
       }
     } catch (err) {
+      if (await bailIfCancelled()) return;
       convergenceSummary = '(שלב ההתכנסות נכשל; יש להתבסס על התמליל המלא בלבד.)';
       await emitEntry(
         makeEntry(
@@ -401,6 +465,7 @@ export async function runMeeting(
   // The transcript accumulated above has already been persisted throughout.
   // -------------------------------------------------------------------
   await emitPhase('extraction');
+  if (await bailIfCancelled()) return;
   try {
     recordApiCall();
     const result = await deps.callModel({
@@ -416,6 +481,7 @@ export async function runMeeting(
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
       apiKey,
+      signal,
     });
     recordTokens(result.usage);
 
@@ -449,6 +515,7 @@ export async function runMeeting(
     await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null });
     onEvent({ type: 'done', result: finalResult });
   } catch (err) {
+    if (await bailIfCancelled()) return;
     const message = errorMessage(err);
     await persist({ status: 'failed', error: message });
     onEvent({ type: 'error', message });

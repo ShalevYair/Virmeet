@@ -52,7 +52,13 @@ export interface CallModelOptions {
   jsonSchema?: Record<string, unknown>;
   /** Optional key sent by the browser for this run, preferred over ANTHROPIC_API_KEY. Never logged or persisted. */
   apiKey?: string;
+  /** Aborts the request (including one already in flight) when the meeting is cancelled. */
+  signal?: AbortSignal;
+  /** Milliseconds before the request is aborted and retried. Defaults to DEFAULT_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
+
+export const DEFAULT_TIMEOUT_MS = 180_000;
 
 export interface CallModelUsage {
   inputTokens: number;
@@ -83,8 +89,13 @@ function isRetryableError(err: unknown): boolean {
   return (
     err instanceof Anthropic.RateLimitError ||
     err instanceof Anthropic.InternalServerError ||
-    err instanceof Anthropic.APIConnectionError
+    err instanceof Anthropic.APIConnectionError || // includes APIConnectionTimeoutError
+    err instanceof Anthropic.APIConnectionTimeoutError
   );
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Anthropic.APIUserAbortError || (err instanceof Error && err.name === 'AbortError');
 }
 
 /** Builds the `system` array with cache_control on the LAST block only (spec §0). */
@@ -173,17 +184,18 @@ export async function callModel(opts: CallModelOptions): Promise<CallModelResult
   const anthropic = getClient(opts.apiKey);
   const params = buildParams(opts);
   const useStreaming = opts.maxTokens > STREAMING_THRESHOLD;
+  const requestOptions = { signal: opts.signal, timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS };
 
   let attempt = 0;
   // attempt 0 = first try, then up to RETRY_DELAYS_MS.length retries.
   for (;;) {
     try {
       const message = useStreaming
-        ? await anthropic.messages.stream(params).finalMessage()
-        : await anthropic.messages.create(params);
+        ? await anthropic.messages.stream(params, requestOptions).finalMessage()
+        : await anthropic.messages.create(params, requestOptions);
       return extractResult(message);
     } catch (err) {
-      if (attempt >= RETRY_DELAYS_MS.length || !isRetryableError(err)) {
+      if (isAbortError(err) || attempt >= RETRY_DELAYS_MS.length || !isRetryableError(err)) {
         throw err;
       }
       await sleep(RETRY_DELAYS_MS[attempt]);

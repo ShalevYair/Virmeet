@@ -110,11 +110,18 @@ data/                    נתוני ריצה — לא בגיט
 הרצת הפגישה משודרת ללקוח ב-SSE מ-`POST /api/meetings/[id]/run`. צורות האירועים:
 
 ```
-{type:'phase',   phase}
-{type:'entry',   entry}
-{type:'done',    result}
-{type:'error',   message}
+{type:'phase',     phase}
+{type:'entry',     entry}
+{type:'done',      result}
+{type:'error',     message}
+{type:'cancelled'}
 ```
+
+`cancelled` נפלט כשהמשתמש ביטל את הפגישה (`PATCH /api/meetings/[id]` עם
+`status:'cancelled'`) — הריצה נבדקת מול ה-store בראש כל שלב ולפני כל תור
+בדיון, כך שהיא נעצרת תוך תור אחד לכל היותר, גם אם הבקשה מטופלת בתהליך אחר.
+השורה `: ping` שנשלחת כל 15 שניות היא heartbeat ל-SSE (לא אירוע `data:`) —
+הלקוח מתעלם ממנה.
 
 ---
 

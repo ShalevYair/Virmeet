@@ -190,13 +190,15 @@ export type RunEvent =
   | { type: 'phase'; phase: MeetingPhase }
   | { type: 'entry'; entry: TranscriptEntry }
   | { type: 'done'; result: MeetingResult }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'cancelled' };
 
 export interface RunMeetingHandlers {
   onPhase?: (phase: MeetingPhase) => void;
   onEntry?: (entry: TranscriptEntry) => void;
   onDone?: (result: MeetingResult) => void;
   onError?: (message: string) => void;
+  onCancelled?: () => void;
   signal?: AbortSignal;
 }
 
@@ -270,6 +272,9 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
               break;
             case 'error':
               handlers.onError?.(parsed.message);
+              break;
+            case 'cancelled':
+              handlers.onCancelled?.();
               break;
           }
         } catch {

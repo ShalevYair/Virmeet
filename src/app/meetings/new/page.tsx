@@ -79,8 +79,9 @@ export default function NewMeetingPage() {
 
   const titleValid = title.trim().length > 0;
   const typesValid = selectedTypeIds.length >= 1;
+  const objectiveValid = objective.trim().length > 0;
   const participantsValid = participantIds.length >= 2;
-  const formValid = titleValid && typesValid && participantsValid;
+  const formValid = titleValid && typesValid && objectiveValid && participantsValid;
 
   async function handleStart() {
     setTouched(true);
@@ -182,6 +183,9 @@ export default function NewMeetingPage() {
             className={inputClasses}
             placeholder="לדוגמה: אנחנו בונים מערכת רישוי דיגיטלית חדשה שמחליפה תהליך ידני..."
           />
+          {touched && !objectiveValid && (
+            <p className="text-xs text-red-600 dark:text-red-400">נדרש לתאר מה רוצים להשיג</p>
+          )}
         </Field>
       </Card>
 
