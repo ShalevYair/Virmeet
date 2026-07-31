@@ -243,6 +243,9 @@ export const meetingsApi = {
       if (patch.status === 'cancelled' && meeting.status === 'completed') {
         badRequest('לא ניתן לבטל פגישה שכבר הושלמה.');
       }
+      if (patch.status === 'draft' && meeting.status === 'completed') {
+        badRequest('לא ניתן להריץ מחדש פגישה שכבר הושלמה. שכפל אותה במקום.');
+      }
       if (patch.discussionRounds !== undefined) requireIntInRange(patch.discussionRounds, 1, 4, 'מספר סבבי דיון');
       if (patch.title !== undefined) requireNonEmpty(patch.title, 'כותרת');
       if (patch.objective !== undefined) requireNonEmpty(patch.objective, 'מטרה');
