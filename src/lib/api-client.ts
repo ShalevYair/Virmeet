@@ -180,6 +180,14 @@ export const meetingsApi = {
       method: 'DELETE',
     }),
   exportUrl: (id: string, format: 'md' | 'json') => `/api/meetings/${id}/export?format=${format}`,
+  /** Reruns only the extraction phase on a failed meeting's saved transcript (A3 in WORKPLAN.md). */
+  extract: (id: string) => {
+    const storedKey = getStoredApiKey();
+    return request<Meeting>(`/api/meetings/${id}/extract`, {
+      method: 'POST',
+      headers: storedKey ? { 'x-anthropic-api-key': storedKey } : undefined,
+    });
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -341,6 +341,7 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
   const [result, setResult] = useState<MeetingResult | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -363,6 +364,8 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     }
     if (m.status === 'failed' && m.error) {
       setRunError(m.error);
+    } else {
+      setRunError(null);
     }
   }
 
@@ -443,6 +446,18 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     return map;
   }, [personas]);
 
+  async function handleRetryExtraction() {
+    setRetrying(true);
+    try {
+      const updated = await meetingsApi.extract(id);
+      applyMeeting(updated);
+    } catch (err) {
+      setRunError(err instanceof ApiError ? err.message : 'ניסיון החילוץ מחדש נכשל');
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   async function handleCancel() {
     setCancelling(true);
     try {
@@ -494,6 +509,11 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
           {isLive && (
             <Button variant="danger" onClick={() => setCancelOpen(true)}>
               בטל פגישה
+            </Button>
+          )}
+          {status === 'failed' && transcript.length > 0 && (
+            <Button variant="secondary" onClick={handleRetryExtraction} disabled={retrying}>
+              {retrying ? 'מנסה לחלץ משימות שוב…' : 'נסה לחלץ משימות שוב'}
             </Button>
           )}
           {status === 'completed' && result && (

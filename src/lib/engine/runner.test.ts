@@ -4,7 +4,7 @@ import { Meeting, MeetingType, OrgSettings, Persona } from '../types';
 import { CallModelOptions, CallModelResult, CallModelUsage } from '../anthropic';
 import { EXTRACTION_SCHEMA, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
 import { MeetingEvent, RunMeetingDeps } from './types';
-import { runMeeting } from './runner';
+import { runExtraction, runMeeting } from './runner';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -448,5 +448,67 @@ describe('runMeeting', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'error' });
     expect(callModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('runExtraction (A3: rerunning only the extraction phase)', () => {
+  it('turns a saved transcript into a MeetingResult on success', async () => {
+    const a = makePersona({ name: 'פרסונה א', model: 'model-a' });
+    const b = makePersona({ name: 'פרסונה ב', model: 'model-b' });
+    const mt = makeMeetingType();
+    const meeting = makeMeeting([a.id, b.id], [mt.id]);
+
+    const outcome = await runExtraction(
+      meeting,
+      [mt],
+      makeOrg(),
+      [a, b],
+      [],
+      'סיכום התכנסות קודם',
+      undefined,
+      async (opts) => okResult(extractionJson(a.name))
+    );
+
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.result.tasks).toHaveLength(1);
+      expect(outcome.result.tasks[0].ownerPersonaId).toBe(a.id);
+    }
+  });
+
+  it('reports a refusal without throwing', async () => {
+    const a = makePersona({ name: 'פרסונה א' });
+    const mt = makeMeetingType();
+    const meeting = makeMeeting([a.id, a.id], [mt.id]);
+
+    const outcome = await runExtraction(
+      meeting,
+      [mt],
+      makeOrg(),
+      [a],
+      [],
+      '',
+      undefined,
+      async () => ({ text: '', webSearches: [], usage: usage(), refused: true, stopReason: 'refusal' })
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toContain('סירב');
+  });
+
+  it('reports invalid JSON in Hebrew instead of throwing an English parse error', async () => {
+    const a = makePersona({ name: 'פרסונה א' });
+    const mt = makeMeetingType();
+    const meeting = makeMeeting([a.id, a.id], [mt.id]);
+
+    const outcome = await runExtraction(meeting, [mt], makeOrg(), [a], [], '', undefined, async () =>
+      okResult('not valid json')
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.error).toContain('JSON');
+      expect(outcome.error).not.toMatch(/unexpected token/i);
+    }
   });
 });

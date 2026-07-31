@@ -15,7 +15,7 @@ import {
   TranscriptEntry,
 } from '../types';
 import { MODELS } from '../types';
-import { callModel as realCallModel, CallModelMessage, CallModelResult } from '../anthropic';
+import { callModel as realCallModel, CallModelMessage, CallModelResult, CallModelUsage } from '../anthropic';
 import {
   getMeeting as storeGetMeeting,
   getOrgSettings as storeGetOrgSettings,
@@ -26,7 +26,7 @@ import {
 import { CallBudget } from './budget';
 import * as prompts from './prompts';
 import { EXTRACTION_SCHEMA, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
-import { OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
+import { CallModelFn, OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
 
 const defaultDeps: RunMeetingDeps = {
   callModel: realCallModel,
@@ -71,6 +71,98 @@ function makeEntry(
     createdAt: nowIso(),
     ...extra,
   };
+}
+
+/** [headerBlock (cached), rest] — see the `headerBlock`/`userMessage` note inside runMeeting. */
+function cachedUserMessage(headerBlock: string, rest: string): CallModelMessage {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: headerBlock, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: rest },
+    ],
+  };
+}
+
+export type ExtractionOutcome =
+  | { ok: true; result: MeetingResult; usage: CallModelUsage }
+  | { ok: false; error: string; usage: CallModelUsage };
+
+/**
+ * Phase 4 (extraction) in isolation: turns an existing transcript + convergence
+ * summary into the structured MeetingResult, without touching prep/opening/
+ * discussion/convergence. Shared by runMeeting() below and by POST
+ * /api/meetings/[id]/extract (A3 in WORKPLAN.md), which reruns just this phase
+ * for a meeting that failed after its transcript was already saved — so a
+ * pricey discussion never has to be redone because extraction alone failed.
+ */
+export async function runExtraction(
+  meeting: Meeting,
+  meetingTypes: MeetingType[],
+  org: OrgSettings,
+  participants: Persona[],
+  transcript: TranscriptEntry[],
+  convergenceSummary: string,
+  apiKey: string | undefined,
+  callModel: CallModelFn = realCallModel
+): Promise<ExtractionOutcome> {
+  const headerBlock = prompts.meetingHeaderBlock(meeting, meetingTypes);
+  const result = await callModel({
+    model: MODELS.facilitator,
+    system: prompts.buildFacilitatorSystemBlocks(org),
+    messages: [
+      cachedUserMessage(headerBlock, prompts.buildExtractionUserMessage(participants, transcript, convergenceSummary)),
+    ],
+    maxTokens: EXTRACTION_MAX_TOKENS,
+    effort: 'high',
+    jsonSchema: EXTRACTION_SCHEMA,
+    apiKey,
+  });
+
+  if (result.refused) {
+    return {
+      ok: false,
+      error: 'המנחה סירב לספק את חילוץ המשימות והתוצאות של הפגישה.',
+      usage: result.usage,
+    };
+  }
+  if (result.stopReason === 'max_tokens') {
+    return {
+      ok: false,
+      error: 'פלט החילוץ נקטע באמצע — הפגישה ארוכה מדי למגבלת הטוקנים הנוכחית.',
+      usage: result.usage,
+    };
+  }
+
+  let raw: ExtractionModelOutput;
+  try {
+    raw = JSON.parse(result.text) as ExtractionModelOutput;
+  } catch {
+    return { ok: false, error: 'פלט החילוץ אינו JSON תקין.', usage: result.usage };
+  }
+
+  const personaIdByName = new Map(participants.map((p) => [p.name, p.id]));
+  const finalResult: MeetingResult = {
+    summary: raw.summary,
+    decisions: raw.decisions,
+    openQuestions: raw.openQuestions,
+    conflicts: raw.conflicts,
+    risks: raw.risks,
+    modelAssumptions: raw.modelAssumptions,
+    tasks: raw.tasks.map((t) => ({
+      id: randomUUID(),
+      title: t.title,
+      description: t.description,
+      ownerPersonaId: personaIdByName.get(t.ownerName) ?? null,
+      ownerName: t.ownerName,
+      priority: t.priority,
+      dependsOn: t.dependsOn,
+      assumption: t.assumption,
+      riskIfAssumptionWrong: t.riskIfAssumptionWrong,
+    })),
+  };
+
+  return { ok: true, result: finalResult, usage: result.usage };
 }
 
 /**
@@ -129,13 +221,7 @@ export async function runMeeting(
   // re-sending shared background files uncached on every single call.
   const headerBlock = prompts.meetingHeaderBlock(meeting, meetingTypes);
   function userMessage(rest: string): CallModelMessage {
-    return {
-      role: 'user',
-      content: [
-        { type: 'text', text: headerBlock, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: rest },
-      ],
-    };
+    return cachedUserMessage(headerBlock, rest);
   }
 
   // Mutable run state. `meeting` above stays a read-only snapshot of the
@@ -431,54 +517,24 @@ export async function runMeeting(
   if (await checkCancelled('extraction')) return;
   try {
     recordApiCall();
-    const result = await deps.callModel({
-      model: MODELS.facilitator,
-      system: prompts.buildFacilitatorSystemBlocks(org),
-      messages: [
-        userMessage(prompts.buildExtractionUserMessage(participants, transcript, convergenceSummary)),
-      ],
-      maxTokens: EXTRACTION_MAX_TOKENS,
-      effort: 'high',
-      jsonSchema: EXTRACTION_SCHEMA,
+    const outcome = await runExtraction(
+      meeting,
+      meetingTypes,
+      org,
+      participants,
+      transcript,
+      convergenceSummary,
       apiKey,
-    });
-    recordTokens(result.usage);
+      deps.callModel
+    );
+    recordTokens(outcome.usage);
 
-    if (result.refused) {
-      throw new Error('המנחה סירב לספק את חילוץ המשימות והתוצאות של הפגישה.');
+    if (!outcome.ok) {
+      throw new Error(outcome.error);
     }
 
-    if (result.stopReason === 'max_tokens') {
-      throw new Error(
-        'פלט החילוץ נקטע באמצע — הפגישה ארוכה מדי למגבלת הטוקנים הנוכחית.'
-      );
-    }
-
-    const raw = JSON.parse(result.text) as ExtractionModelOutput;
-    const personaIdByName = new Map(participants.map((p) => [p.name, p.id]));
-
-    const finalResult: MeetingResult = {
-      summary: raw.summary,
-      decisions: raw.decisions,
-      openQuestions: raw.openQuestions,
-      conflicts: raw.conflicts,
-      risks: raw.risks,
-      modelAssumptions: raw.modelAssumptions,
-      tasks: raw.tasks.map((t) => ({
-        id: randomUUID(),
-        title: t.title,
-        description: t.description,
-        ownerPersonaId: personaIdByName.get(t.ownerName) ?? null,
-        ownerName: t.ownerName,
-        priority: t.priority,
-        dependsOn: t.dependsOn,
-        assumption: t.assumption,
-        riskIfAssumptionWrong: t.riskIfAssumptionWrong,
-      })),
-    };
-
-    await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null });
-    onEvent({ type: 'done', result: finalResult });
+    await persist({ status: 'completed', result: outcome.result, completedAt: nowIso(), error: null });
+    onEvent({ type: 'done', result: outcome.result });
   } catch (err) {
     const message = errorMessage(err);
     await persist({ status: 'failed', error: message });
