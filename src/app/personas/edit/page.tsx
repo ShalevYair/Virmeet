@@ -52,7 +52,6 @@ function PersonaEditorInner({ id }: { id: string }) {
       );
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(load, [id]);
 
   function update<K extends keyof Persona>(key: K, value: Persona[K]) {
