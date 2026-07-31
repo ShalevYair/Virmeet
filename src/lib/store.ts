@@ -255,7 +255,7 @@ export async function updateOrgSettings(
 // Meetings
 // ---------------------------------------------------------------------------
 
-export type MeetingSummary = Omit<Meeting, 'transcript' | 'result'>;
+export type MeetingSummary = Omit<Meeting, 'transcript' | 'result' | 'files'>;
 
 export type MeetingCreateInput = {
   title: string;
@@ -273,7 +273,7 @@ export async function listMeetings(summaryOnly = false): Promise<Meeting[] | Mee
   const meetings: Meeting[] = await db.getAll('meetings');
   meetings.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   if (!summaryOnly) return meetings;
-  return meetings.map(({ transcript: _transcript, result: _result, ...rest }) => rest);
+  return meetings.map(({ transcript: _transcript, result: _result, files: _files, ...rest }) => rest);
 }
 
 export async function getMeeting(id: string): Promise<Meeting | null> {
