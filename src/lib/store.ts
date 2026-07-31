@@ -310,7 +310,14 @@ export async function deleteMeetingType(id: string): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export async function getOrgSettings(): Promise<OrgSettings> {
-  return readJsonWithSeed<OrgSettings>(ORG_FILE, seedOrgSettings);
+  const settings = await readJsonWithSeed<OrgSettings>(ORG_FILE, seedOrgSettings);
+  // Backfill fields added after some orgs' data/org.json was first written.
+  const seedDefaults = seedOrgSettings();
+  return {
+    ...settings,
+    maxMeetingApiCalls: settings.maxMeetingApiCalls ?? seedDefaults.maxMeetingApiCalls,
+    maxMeetingTokens: settings.maxMeetingTokens ?? seedDefaults.maxMeetingTokens,
+  };
 }
 
 export async function updateOrgSettings(

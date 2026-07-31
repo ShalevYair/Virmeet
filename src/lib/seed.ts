@@ -20,6 +20,8 @@ export function seedOrgSettings(): OrgSettings {
       'בתקן הגנת סייבר הממשלתי לפני עלייה לאוויר. תקציב הפיתוח לשנה הנוכחית כבר מוקצה ברובו; ' +
       'חריגה מחייבת אישור חריג. צוותי הפיתוח הקיימים משרתים גם מערכות production קריטיות ולא ' +
       'ניתן לגייס כוח אדם נוסף בטווח הקצר.',
+    maxMeetingApiCalls: 40,
+    maxMeetingTokens: 1_000_000,
     updatedAt: new Date(0).toISOString(),
   };
 }

@@ -2,7 +2,8 @@
 // The disclaimer banner below must be reproduced verbatim, byte-for-byte,
 // as the opening lines of every Markdown export.
 
-import { Meeting, MeetingTask, TranscriptEntry } from '@/lib/types';
+import { Meeting, MeetingTask, MODELS, Persona, TranscriptEntry } from '@/lib/types';
+import { estimateTranscriptCostUsd } from '@/lib/pricing';
 
 export const DISCLAIMER_HE =
   'הפלט הזה הוא הכנה לפגישה, לא תחליף לה. הדעות כאן נוצרו על ידי מודל שפה ואינן מייצגות את עמדתם של אנשים אמיתיים.';
@@ -67,7 +68,20 @@ function renderTasksByOwner(tasks: MeetingTask[]): string {
   return sections.join('\n\n');
 }
 
-export function renderMarkdown(meeting: Meeting): string {
+function renderUsage(meeting: Meeting, personas: Persona[]): string {
+  const modelBySpeakerId = new Map<string, string>(personas.map((p) => [p.id, p.model]));
+  modelBySpeakerId.set('facilitator', MODELS.facilitator);
+  const costUsd = estimateTranscriptCostUsd(meeting.transcript, modelBySpeakerId);
+  return (
+    `מספר קריאות מודל: ${meeting.usage.apiCalls}\n\n` +
+    `טוקני קלט: ${meeting.usage.inputTokens}\n\n` +
+    `טוקני פלט: ${meeting.usage.outputTokens}\n\n` +
+    `טוקני cache: ${meeting.usage.cacheReadTokens}\n\n` +
+    `אומדן עלות: $${costUsd.toFixed(3)}`
+  );
+}
+
+export function renderMarkdown(meeting: Meeting, personas: Persona[] = []): string {
   const parts: string[] = [];
   parts.push(`> **${DISCLAIMER_HE}**`);
   parts.push(`# ${meeting.title || 'פגישה ללא כותרת'}`);
@@ -111,6 +125,8 @@ export function renderMarkdown(meeting: Meeting): string {
       }`
     );
   }
+
+  parts.push(`## צריכה\n\n${renderUsage(meeting, personas)}`);
 
   return parts.join('\n\n') + '\n';
 }

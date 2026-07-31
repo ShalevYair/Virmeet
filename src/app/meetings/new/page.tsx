@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, healthApi, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
 import type { MeetingType, Persona } from '@/lib/types';
+import { MODELS } from '@/lib/types';
+import { estimatePreRunUsage } from '@/lib/pricing';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 import { getStoredApiKey } from '@/lib/api-key';
@@ -76,6 +78,15 @@ export default function NewMeetingPage() {
   function removeStagedFile(index: number) {
     setStagedFiles((prev) => prev.filter((_, i) => i !== index));
   }
+
+  const selectedPersonaModels = useMemo(
+    () => (personas ?? []).filter((p) => participantIds.includes(p.id)).map((p) => p.model),
+    [personas, participantIds]
+  );
+  const preRunEstimate = useMemo(
+    () => estimatePreRunUsage(selectedPersonaModels, MODELS.facilitator, discussionRounds),
+    [selectedPersonaModels, discussionRounds]
+  );
 
   const titleValid = title.trim().length > 0;
   const typesValid = selectedTypeIds.length >= 1;
@@ -315,6 +326,20 @@ export default function NewMeetingPage() {
           ))}
         </div>
       </Card>
+
+      {participantIds.length > 0 && (
+        <Card className="flex flex-col gap-1 p-5">
+          <h2 className="text-sm font-semibold">אומדן עלות לפני הרצה</h2>
+          <p className="text-sm text-black/70 dark:text-white/70">
+            כ-{preRunEstimate.apiCalls} קריאות מודל, כ-
+            {(preRunEstimate.estimatedInputTokens + preRunEstimate.estimatedOutputTokens).toLocaleString('he-IL')}{' '}
+            טוקנים — אומדן עלות: כ-${preRunEstimate.estimatedCostUsd.toFixed(2)}
+          </p>
+          <p className="text-xs text-black/50 dark:text-white/50">
+            אומדן גס בלבד; העלות בפועל תלויה באורך התמליל ובחיפושי רשת.
+          </p>
+        </Card>
+      )}
 
       {missingApiKey && (
         <ErrorBanner

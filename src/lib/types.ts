@@ -107,5 +107,7 @@ export interface OrgSettings {
   organizationName: string; // "משרד התחבורה"
   description: string; // רקע ארגוני שמוזרק לכל הפרסונות
   constraints: string; // תקציב, רגולציה, אילוצים
+  maxMeetingApiCalls: number; // תקרת קריאות מודל גלובלית לפגישה אחת
+  maxMeetingTokens: number; // תקרת טוקנים גלובלית (input+output+cache) לפגישה אחת
   updatedAt: string;
 }

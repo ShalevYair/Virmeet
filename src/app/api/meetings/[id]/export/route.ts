@@ -1,4 +1,4 @@
-import { getMeeting } from '@/lib/store';
+import { getMeeting, listPersonas } from '@/lib/store';
 import { internalError, jsonError } from '../../../_lib/http';
 import { renderMarkdown } from './render';
 
@@ -28,7 +28,8 @@ export async function GET(req: Request, { params }: RouteContext) {
       });
     }
 
-    const body = renderMarkdown(meeting);
+    const personas = await listPersonas();
+    const body = renderMarkdown(meeting, personas);
     return new Response(body, {
       status: 200,
       headers: {

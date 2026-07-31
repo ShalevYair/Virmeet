@@ -36,6 +36,8 @@ const FIELD_LABELS_HE: Record<string, string> = {
   organizationName: 'שם הארגון',
   description: 'תיאור',
   constraints: 'אילוצים',
+  maxMeetingApiCalls: 'תקרת קריאות מודל לפגישה',
+  maxMeetingTokens: 'תקרת טוקנים לפגישה',
 };
 
 function fieldLabel(path: (string | number)[]): string {

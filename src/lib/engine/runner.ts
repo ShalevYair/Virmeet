@@ -188,6 +188,25 @@ export async function runMeeting(
     return true;
   }
 
+  // P2.2 — meeting-wide cost cap (org.maxMeetingApiCalls / maxMeetingTokens).
+  // Once exceeded, the discussion is cut short and the run jumps straight to
+  // extraction so the user still gets a useful result from what did happen.
+  let budgetCapHit: string | null = null;
+
+  async function checkBudgetCap(): Promise<boolean> {
+    const totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens;
+    const callsExceeded = usage.apiCalls >= org.maxMeetingApiCalls;
+    const tokensExceeded = totalTokens >= org.maxMeetingTokens;
+    if (!callsExceeded && !tokensExceeded) return false;
+    if (!budgetCapHit) {
+      budgetCapHit = callsExceeded
+        ? `הפגישה חצתה את תקרת הקריאות למודל שהוגדרה בהגדרות הארגון (${org.maxMeetingApiCalls}). הדיון הופסק וממשיכים ישירות לחילוץ המשימות מהתמליל הקיים.`
+        : `הפגישה חצתה את תקרת הטוקנים שהוגדרה בהגדרות הארגון (${org.maxMeetingTokens.toLocaleString('he-IL')}). הדיון הופסק וממשיכים ישירות לחילוץ המשימות מהתמליל הקיים.`;
+      await emitEntry(makeEntry(currentPhase, 'system', 'מערכת', budgetCapHit));
+    }
+    return true;
+  }
+
   function recordApiCall(): void {
     usage = { ...usage, apiCalls: usage.apiCalls + 1 };
   }
@@ -282,8 +301,9 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   await emitPhase('opening');
   if (await bailIfCancelled()) return;
+  await checkBudgetCap();
   let opening: OpeningOutput = { framing: '', conflicts: [] };
-  {
+  if (!budgetCapHit) {
     recordApiCall();
     try {
       const result = await deps.callModel({
@@ -347,11 +367,13 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   await emitPhase('discussion');
   if (await bailIfCancelled()) return;
+  await checkBudgetCap();
   const totalRounds = meeting.discussionRounds;
 
-  for (let round = 1; round <= totalRounds; round++) {
+  discussionLoop: for (let round = 1; round <= totalRounds; round++) {
     for (const persona of participants) {
       if (await bailIfCancelled()) return;
+      if (await checkBudgetCap()) break discussionLoop;
 
       if (!budget.canCall(persona.id)) {
         if (budget.shouldAnnounceExhausted(persona.id)) {
@@ -421,8 +443,9 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   await emitPhase('convergence');
   if (await bailIfCancelled()) return;
-  let convergenceSummary = '';
-  {
+  await checkBudgetCap();
+  let convergenceSummary = budgetCapHit ? '(הדיון נעצר עקב חריגה מתקרת העלות; יש להתבסס על התמליל שנצבר בלבד.)' : '';
+  if (!budgetCapHit) {
     recordApiCall();
     try {
       const result = await deps.callModel({
@@ -498,7 +521,7 @@ export async function runMeeting(
       openQuestions: raw.openQuestions,
       conflicts: raw.conflicts,
       risks: raw.risks,
-      modelAssumptions: raw.modelAssumptions,
+      modelAssumptions: budgetCapHit ? [...raw.modelAssumptions, budgetCapHit] : raw.modelAssumptions,
       tasks: raw.tasks.map((t) => ({
         id: randomUUID(),
         title: t.title,

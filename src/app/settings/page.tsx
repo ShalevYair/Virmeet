@@ -37,6 +37,8 @@ export default function SettingsPage() {
         organizationName: settings.organizationName,
         description: settings.description,
         constraints: settings.constraints,
+        maxMeetingApiCalls: settings.maxMeetingApiCalls,
+        maxMeetingTokens: settings.maxMeetingTokens,
       });
       setSettings(updated);
       setSaved(true);
@@ -97,6 +99,31 @@ export default function SettingsPage() {
               className={inputClasses}
             />
           </Field>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="תקרת קריאות מודל לפגישה" hint="מספר קריאות המודל המרבי המותר בפגישה אחת, בכל הפרסונות והמנחה יחד">
+              <input
+                type="number"
+                min={1}
+                max={500}
+                className={inputClasses}
+                value={settings.maxMeetingApiCalls}
+                onChange={(e) => update('maxMeetingApiCalls', Number(e.target.value))}
+              />
+            </Field>
+
+            <Field label="תקרת טוקנים לפגישה" hint="סך טוקני קלט, פלט ו-cache מותרים בפגישה אחת">
+              <input
+                type="number"
+                min={1000}
+                max={20_000_000}
+                step={1000}
+                className={inputClasses}
+                value={settings.maxMeetingTokens}
+                onChange={(e) => update('maxMeetingTokens', Number(e.target.value))}
+              />
+            </Field>
+          </div>
 
           <div className="flex items-center justify-end gap-3 border-t border-black/10 pt-4 dark:border-white/10">
             {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">נשמר ✓</span>}

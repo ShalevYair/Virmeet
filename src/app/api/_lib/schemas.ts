@@ -30,6 +30,8 @@ export const orgUpdateSchema = z
     organizationName: z.string().min(1),
     description: z.string().min(1),
     constraints: z.string().min(1),
+    maxMeetingApiCalls: z.number().int().min(1).max(500),
+    maxMeetingTokens: z.number().int().min(1000).max(20_000_000),
   })
   .partial();
 

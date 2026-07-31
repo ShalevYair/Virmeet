@@ -16,6 +16,8 @@ import type {
   Persona,
   TranscriptEntry,
 } from '@/lib/types';
+import { MODELS } from '@/lib/types';
+import { estimateTranscriptCostUsd } from '@/lib/pricing';
 import { Badge, Button, Card, ErrorBanner, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
@@ -332,6 +334,49 @@ function ResultTabs({ result }: { result: MeetingResult }) {
   );
 }
 
+function UsageCard({
+  apiCalls,
+  inputTokens,
+  outputTokens,
+  cacheReadTokens,
+  costUsd,
+}: {
+  apiCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+}) {
+  const totalInput = inputTokens + cacheReadTokens;
+  const cacheHitPct = totalInput > 0 ? Math.round((cacheReadTokens / totalInput) * 100) : 0;
+  return (
+    <Card className="flex flex-col gap-3 p-5">
+      <h2 className="text-sm font-semibold">צריכה</h2>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div>
+          <p className="text-xs text-black/50 dark:text-white/50">קריאות מודל</p>
+          <p className="text-lg font-semibold">{apiCalls}</p>
+        </div>
+        <div>
+          <p className="text-xs text-black/50 dark:text-white/50">טוקני קלט</p>
+          <p className="text-lg font-semibold">{inputTokens.toLocaleString('he-IL')}</p>
+        </div>
+        <div>
+          <p className="text-xs text-black/50 dark:text-white/50">טוקני פלט</p>
+          <p className="text-lg font-semibold">{outputTokens.toLocaleString('he-IL')}</p>
+        </div>
+        <div>
+          <p className="text-xs text-black/50 dark:text-white/50">פגיעת cache</p>
+          <p className="text-lg font-semibold">{cacheHitPct}%</p>
+        </div>
+      </div>
+      <p className="text-sm text-black/70 dark:text-white/70">
+        אומדן עלות: <span className="font-semibold">${costUsd.toFixed(3)}</span>
+      </p>
+    </Card>
+  );
+}
+
 export default function MeetingRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -465,6 +510,26 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
     return map;
   }, [personas]);
 
+  const usageSummary = useMemo(() => {
+    const modelBySpeakerId = new Map<string, string>();
+    for (const p of personas ?? []) modelBySpeakerId.set(p.id, p.model);
+    modelBySpeakerId.set('facilitator', MODELS.facilitator);
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let apiCalls = 0;
+    for (const entry of transcript) {
+      if (!entry.usage) continue;
+      inputTokens += entry.usage.inputTokens;
+      outputTokens += entry.usage.outputTokens;
+      cacheReadTokens += entry.usage.cacheReadTokens;
+      apiCalls += 1;
+    }
+    const costUsd = estimateTranscriptCostUsd(transcript, modelBySpeakerId);
+    return { inputTokens, outputTokens, cacheReadTokens, apiCalls, costUsd };
+  }, [transcript, personas]);
+
   async function handleCancel() {
     setCancelling(true);
     try {
@@ -585,6 +650,8 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
       </Card>
+
+      {usageSummary.apiCalls > 0 && <UsageCard {...usageSummary} />}
 
       {status === 'completed' && result && <ResultTabs result={result} />}
 
