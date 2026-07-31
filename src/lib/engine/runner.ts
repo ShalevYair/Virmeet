@@ -231,6 +231,7 @@ export async function runMeeting(
           jsonSchema: PREP_SCHEMA,
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
           apiKey: apiKeyFor(persona.model),
+          signal,
         });
         return result;
       } finally {
@@ -248,9 +249,15 @@ export async function runMeeting(
     const attempt = prepAttempts[i];
 
     if (attempt.status === 'rejected') {
-      await emitEntry(
-        makeEntry('prep', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(attempt.reason)))
-      );
+      // A cancelled run aborts every in-flight prep call at once — those
+      // rejections are the cancellation, not a persona failure, and the
+      // cancellation line (written by abortIfCancelled right after this
+      // loop) shouldn't be preceded by a wall of fake per-persona errors.
+      if (!isAborted()) {
+        await emitEntry(
+          makeEntry('prep', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(attempt.reason)))
+        );
+      }
       continue;
     }
 
@@ -311,6 +318,7 @@ export async function runMeeting(
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
         apiKey: apiKeyFor(facilitatorModel),
+        signal,
       });
       recordTokens(result.usage);
 
@@ -347,14 +355,19 @@ export async function runMeeting(
         framing: 'שלב הפתיחה נכשל — הדיון ימשיך ללא מסגור מהמנחה, ישירות מתוך שלב ההכנה.',
         conflicts: [],
       };
-      await emitEntry(
-        makeEntry(
-          'opening',
-          'system',
-          'מערכת',
-          `שלב הפתיחה נכשל (${errorMessage(err)}). ממשיכים לדיון עם מסגור בסיסי.`
-        )
-      );
+      // A cancelled run aborts the in-flight call, which rejects here — that's
+      // the cancellation, not a real facilitator failure; don't write a fake
+      // error line ahead of the cancellation line abortIfCancelled adds next.
+      if (!isAborted()) {
+        await emitEntry(
+          makeEntry(
+            'opening',
+            'system',
+            'מערכת',
+            `שלב הפתיחה נכשל (${errorMessage(err)}). ממשיכים לדיון עם מסגור בסיסי.`
+          )
+        );
+      }
     }
   }
 
@@ -400,6 +413,7 @@ export async function runMeeting(
           effort: 'medium',
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
           apiKey: apiKeyFor(persona.model),
+          signal,
         });
         budget.record(persona.id);
         recordTokens(result.usage);
@@ -426,11 +440,16 @@ export async function runMeeting(
         );
       } catch (err) {
         budget.record(persona.id);
-        await emitEntry(
-          makeEntry('discussion', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(err)), {
-            round,
-          })
-        );
+        // A cancelled run aborts the in-flight call, which rejects here —
+        // that's the cancellation, not this persona failing; the next loop
+        // iteration's abortIfCancelled writes the real cancellation line.
+        if (!isAborted()) {
+          await emitEntry(
+            makeEntry('discussion', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(err)), {
+              round,
+            })
+          );
+        }
       }
     }
   }
@@ -453,6 +472,7 @@ export async function runMeeting(
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         apiKey: apiKeyFor(facilitatorModel),
+        signal,
       });
       recordTokens(result.usage);
 
@@ -465,14 +485,19 @@ export async function runMeeting(
       }
     } catch (err) {
       convergenceSummary = '(שלב ההתכנסות נכשל; יש להתבסס על התמליל המלא בלבד.)';
-      await emitEntry(
-        makeEntry(
-          'convergence',
-          'system',
-          'מערכת',
-          `שלב ההתכנסות נכשל (${errorMessage(err)}). ממשיכים לחילוץ המשימות ישירות מהתמליל.`
-        )
-      );
+      // A cancelled run aborts the in-flight call, which rejects here —
+      // that's the cancellation, not a real facilitator failure; don't write
+      // a fake error line ahead of the cancellation line added next.
+      if (!isAborted()) {
+        await emitEntry(
+          makeEntry(
+            'convergence',
+            'system',
+            'מערכת',
+            `שלב ההתכנסות נכשל (${errorMessage(err)}). ממשיכים לחילוץ המשימות ישירות מהתמליל.`
+          )
+        );
+      }
     }
   }
 
@@ -498,6 +523,7 @@ export async function runMeeting(
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
       apiKey: apiKeyFor(facilitatorModel),
+      signal,
     });
     recordTokens(result.usage);
 

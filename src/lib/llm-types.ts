@@ -29,6 +29,8 @@ export interface CallModelOptions {
   jsonSchema?: Record<string, unknown>;
   /** Optional key sent by the browser for this run, preferred over the server-side env key for this model's provider. Never logged or persisted. */
   apiKey?: string;
+  /** Aborts the in-flight provider request and any pending retry backoff. */
+  signal?: AbortSignal;
 }
 
 export interface CallModelUsage {
