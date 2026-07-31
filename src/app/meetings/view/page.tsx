@@ -54,6 +54,14 @@ const PRIORITY_TONE: Record<MeetingTask['priority'], 'danger' | 'warning' | 'neu
 
 const FACILITATOR_COLOR = '#334155';
 
+// A run whose engine died with its tab (closed mid-meeting) leaves the
+// meeting stuck in 'running' forever — nothing else ever updates it. Chosen
+// conservatively: a single high-effort model call can run past a minute, and
+// the retry loop alone can add up to 14s, so this must clear real in-progress
+// work by a wide margin. A false "stuck" banner on a meeting that's actually
+// still running is worse than the current silence.
+const STALE_RUNNING_MS = 3 * 60_000;
+
 function DisclaimerBanner() {
   return (
     <div
@@ -369,6 +377,7 @@ function MeetingRunInner({ id }: { id: string }) {
   const [cancelling, setCancelling] = useState(false);
   const [starting, setStarting] = useState(false);
   const [usage, setUsage] = useState<Meeting['usage'] | null>(null);
+  const [staleRunning, setStaleRunning] = useState(false);
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -397,11 +406,24 @@ function MeetingRunInner({ id }: { id: string }) {
 
   function startPolling() {
     stopPolling();
+    setStaleRunning(false);
     pollRef.current = setInterval(async () => {
       try {
         const fresh = await meetingsApi.get(id);
         applyMeeting(fresh);
         if (fresh.status !== 'running' && fresh.status !== 'draft') {
+          stopPolling();
+          return;
+        }
+        // The engine persists after every phase transition and every
+        // transcript entry (runner.ts), so a 'running' meeting whose
+        // updatedAt hasn't moved in a while almost certainly died with the
+        // tab that was running it — nothing else will ever update it, so
+        // polling forever would never resolve. Stop polling and let the user
+        // decide (never flip status automatically: a second tab could
+        // genuinely still be running this meeting).
+        if (fresh.status === 'running' && Date.now() - new Date(fresh.updatedAt).getTime() > STALE_RUNNING_MS) {
+          setStaleRunning(true);
           stopPolling();
         }
       } catch {
@@ -605,7 +627,19 @@ function MeetingRunInner({ id }: { id: string }) {
 
       <PhaseRail current={currentPhase} status={status} />
 
-      {status === 'running' && (
+      {status === 'running' && staleRunning && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-900 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-200">
+          <span>
+            נראה שהריצה נקטעה — לא התקבל עדכון מהפגישה זמן ארוך. ייתכן שהלשונית שהריצה אותה נסגרה. אפשר לבטל
+            את הפגישה ולנסות שוב.
+          </span>
+          <Button variant="danger" onClick={() => setCancelOpen(true)} disabled={cancelling}>
+            בטל פגישה
+          </Button>
+        </div>
+      )}
+
+      {status === 'running' && !staleRunning && (
         <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-400">
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
           הפגישה מתקיימת כעת…
