@@ -43,7 +43,7 @@ export interface AttachedFile {
   name: string;
   mimeType: string;
   sizeBytes: number;
-  storedPath: string; // יחסי ל-data/
+  storedPath: string; // ריק ('') להעלאות דרך הדפדפן (store.ts) — משמעותי רק לקבצי seed (public/seed/files/, ראו seed-loader.ts), משריד לגרסה עם אחסון בדיסק (data/)
   extractedText: string; // '' אם החילוץ נכשל
   extractionError?: string;
   addedAt: string; // ISO
