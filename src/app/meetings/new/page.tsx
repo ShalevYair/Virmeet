@@ -210,7 +210,7 @@ export default function NewMeetingPage() {
             {activePersonas.map((p) => {
               const selected = participantIds.includes(p.id);
               return (
-                <button key={p.id} type="button" onClick={() => toggleParticipant(p.id)} className="text-right">
+                <label key={p.id} className="block cursor-pointer text-right">
                   <Card
                     className={`flex items-center gap-3 p-3 transition-shadow hover:shadow-md ${
                       selected ? 'ring-2 ring-blue-500' : ''
@@ -221,7 +221,6 @@ export default function NewMeetingPage() {
                       checked={selected}
                       onChange={() => toggleParticipant(p.id)}
                       className="shrink-0"
-                      onClick={(e) => e.stopPropagation()}
                     />
                     <PersonaAvatar name={p.name} color={p.color} size={36} />
                     <div className="min-w-0">
@@ -229,7 +228,7 @@ export default function NewMeetingPage() {
                       <p className="truncate text-xs text-black/55 dark:text-white/55">{p.role}</p>
                     </div>
                   </Card>
-                </button>
+                </label>
               );
             })}
           </div>
@@ -242,6 +241,9 @@ export default function NewMeetingPage() {
           קבצים אלה יוזרקו לכל המשתתפים בפגישה. הם יועלו בפועל כשמתחילים את הפגישה.
         </p>
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="גררו קבצים לכאן או הקישו Enter לבחירת קבצים"
           onDragOver={(e) => {
             e.preventDefault();
             setDragging(true);
@@ -253,7 +255,13 @@ export default function NewMeetingPage() {
             addFiles(e.dataTransfer.files);
           }}
           onClick={() => document.getElementById('shared-file-input')?.click()}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              document.getElementById('shared-file-input')?.click();
+            }
+          }}
+          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 ${
             dragging ? 'border-blue-500 bg-blue-500/5' : 'border-black/15 hover:border-black/30 dark:border-white/15 dark:hover:border-white/30'
           }`}
         >
