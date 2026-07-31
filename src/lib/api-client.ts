@@ -394,7 +394,7 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
   // no-op on a genuine first run.
   await store.updateMeeting(id, {
     transcript: [],
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
   });
 
   let aborted = false;

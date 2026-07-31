@@ -147,7 +147,11 @@ export async function runMeeting(
   // fields that don't change during a run (title/objective/files/rounds) —
   // everything that *does* change lives in these locals.
   let transcript: TranscriptEntry[] = [...meeting.transcript];
-  let usage = { ...meeting.usage };
+  // A meeting persisted before cacheWriteTokens existed has no such field in
+  // IndexedDB — default it, or `undefined + n` below silently poisons every
+  // subsequent usage number with NaN. (IndexedDB doesn't enforce the type
+  // above at the record level, so this can happen despite the static type.)
+  let usage: Meeting['usage'] = { ...meeting.usage, cacheWriteTokens: meeting.usage.cacheWriteTokens ?? 0 };
 
   const budget = new CallBudget(new Map(participants.map((p) => [p.id, p.maxApiCalls])));
 
@@ -200,6 +204,7 @@ export async function runMeeting(
       inputTokens: usage.inputTokens + u.inputTokens,
       outputTokens: usage.outputTokens + u.outputTokens,
       cacheReadTokens: usage.cacheReadTokens + u.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens + u.cacheWriteTokens,
     };
   }
 

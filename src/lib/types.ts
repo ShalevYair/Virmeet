@@ -126,7 +126,7 @@ export interface Meeting {
   transcript: TranscriptEntry[];
   result: MeetingResult | null;
   error: string | null;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; apiCalls: number };
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; apiCalls: number };
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

@@ -72,7 +72,7 @@ export function makeMeeting(overrides: Partial<Meeting> = {}): Meeting {
     transcript: [],
     result: null,
     error: null,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -141,7 +141,7 @@ export function makeCallModelResult(overrides: Partial<CallModelResult> = {}): C
   return {
     text: '',
     webSearches: [],
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     refused: false,
     truncated: false,
     ...overrides,

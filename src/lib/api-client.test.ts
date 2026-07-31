@@ -113,7 +113,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
           createdAt: new Date().toISOString(),
         },
       ],
-      usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, apiCalls: 3 },
+      usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 3 },
     });
 
     getMeetingMock.mockResolvedValue(meeting);
@@ -125,7 +125,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
 
     expect(updateMeetingMock).toHaveBeenCalledWith(meeting.id, {
       transcript: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     });
     // The reset must land before the engine reads the meeting back, or the
     // fix is a no-op.
@@ -147,7 +147,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
 
     expect(updateMeetingMock).toHaveBeenCalledWith(meeting.id, {
       transcript: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     });
     expect(engineRunMeetingMock).toHaveBeenCalledTimes(1);
   });

@@ -103,7 +103,7 @@ describe('runAttributionTest', () => {
     const callModelMock = vi.fn().mockResolvedValue({
       text: JSON.stringify({ assignments: [{ index: 0, personaName: 'א' }] }),
       webSearches: [],
-      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
       refused: false,
       truncated: false,
     });

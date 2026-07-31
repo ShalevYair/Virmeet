@@ -296,7 +296,7 @@ export async function createMeeting(input: MeetingCreateInput): Promise<Meeting>
     transcript: [],
     result: null,
     error: null,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     createdAt: now,
     updatedAt: now,
     completedAt: null,
