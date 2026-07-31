@@ -78,6 +78,15 @@ export function renderMarkdown(meeting: Meeting): string {
     `**מטרה:** ${meeting.objective || '(לא הוגדרה)'}\n\n**סטטוס:** ${STATUS_LABELS_HE[meeting.status]}\n\n**מספר סבבי דיון:** ${meeting.discussionRounds}`
   );
 
+  parts.push(
+    `## שימוש\n\n` +
+      `**קריאות API:** ${meeting.usage.apiCalls}\n\n` +
+      `**טוקני קלט:** ${meeting.usage.inputTokens}\n\n` +
+      `**טוקני פלט:** ${meeting.usage.outputTokens}\n\n` +
+      `**טוקני קריאת cache:** ${meeting.usage.cacheReadTokens}\n\n` +
+      `**טוקני כתיבת cache:** ${meeting.usage.cacheWriteTokens}`
+  );
+
   if (meeting.error) {
     parts.push(`## שגיאה\n${meeting.error}`);
   }

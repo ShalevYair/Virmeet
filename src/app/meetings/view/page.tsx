@@ -177,6 +177,29 @@ function TranscriptBubble({
   );
 }
 
+function UsagePanel({ usage }: { usage: Meeting['usage'] }) {
+  const stats: { label: string; value: number }[] = [
+    { label: 'קריאות API', value: usage.apiCalls },
+    { label: 'טוקני קלט', value: usage.inputTokens },
+    { label: 'טוקני פלט', value: usage.outputTokens },
+    { label: 'טוקני קריאת cache', value: usage.cacheReadTokens },
+    { label: 'טוקני כתיבת cache', value: usage.cacheWriteTokens },
+  ];
+  return (
+    <Card className="flex flex-col gap-3 p-5">
+      <h2 className="text-sm font-semibold">שימוש</h2>
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        {stats.map((s) => (
+          <div key={s.label} className="flex flex-col">
+            <span className="text-xs text-black/55 dark:text-white/55">{s.label}</span>
+            <span className="text-sm font-semibold tabular-nums">{s.value.toLocaleString('he-IL')}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function TaskCard({ task }: { task: MeetingTask }) {
   return (
     <Card className="flex flex-col gap-2 p-4">
@@ -345,6 +368,7 @@ function MeetingRunInner({ id }: { id: string }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [usage, setUsage] = useState<Meeting['usage'] | null>(null);
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -362,6 +386,7 @@ function MeetingRunInner({ id }: { id: string }) {
     setTranscript(m.transcript);
     setStatus(m.status);
     setResult(m.result);
+    setUsage(m.usage);
     if (m.transcript.length > 0) {
       setCurrentPhase(m.transcript[m.transcript.length - 1].phase);
     }
@@ -399,13 +424,22 @@ function MeetingRunInner({ id }: { id: string }) {
       setResult(null);
       setRunError(null);
       setCurrentPhase('prep');
+      setUsage({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 });
     }
     const controller = new AbortController();
     abortRef.current = controller;
     setStatus('running');
     await runMeeting(id, {
       signal: controller.signal,
-      onPhase: (phase) => setCurrentPhase(phase),
+      onPhase: (phase) => {
+        setCurrentPhase(phase);
+        // TranscriptEntry.usage is populated per-line, but system lines carry
+        // none and facilitator calls count toward total usage without
+        // attaching it to an entry — summing from entries would undercount.
+        // Storage has the true running total after every persist(), so pull
+        // it fresh at each phase boundary instead.
+        meetingsApi.get(id).then((m) => setUsage(m.usage)).catch(() => {});
+      },
       onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
       onDone: (res) => {
         setResult(res);
@@ -548,7 +582,7 @@ function MeetingRunInner({ id }: { id: string }) {
               הרץ שוב
             </Button>
           )}
-          {status === 'completed' && result && (
+          {(status === 'completed' || status === 'failed' || status === 'cancelled') && (
             <>
               <Button variant="secondary" onClick={() => downloadMeetingMarkdown(meeting)}>
                 ייצוא Markdown
@@ -586,6 +620,8 @@ function MeetingRunInner({ id }: { id: string }) {
       )}
 
       {runError && <ErrorBanner message={runError} />}
+
+      {status !== 'draft' && usage && <UsagePanel usage={usage} />}
 
       <Card className="flex flex-col gap-4 p-5">
         <h2 className="text-sm font-semibold">תמליל הפגישה</h2>
