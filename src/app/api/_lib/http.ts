@@ -5,9 +5,15 @@
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { idSchema } from './schemas';
 
 export function jsonError(message: string, status: number): NextResponse {
   return NextResponse.json({ error: message }, { status });
+}
+
+/** Validates a route `[id]`/`[fileId]` param as a UUID before it reaches the store (B2 in WORKPLAN.md). */
+export function validateId(id: string): NextResponse | null {
+  return idSchema.safeParse(id).success ? null : jsonError('מזהה לא תקין.', 400);
 }
 
 function fieldLabel(path: (string | number)[]): string {

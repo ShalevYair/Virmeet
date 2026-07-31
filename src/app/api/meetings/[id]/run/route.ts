@@ -7,7 +7,7 @@
 import { getMeeting } from '@/lib/store';
 import { runMeeting } from '@/lib/engine/runner';
 import { MeetingEvent } from '@/lib/engine/types';
-import { jsonError, requireApiKey } from '../../../_lib/http';
+import { jsonError, requireApiKey, validateId } from '../../../_lib/http';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -15,6 +15,8 @@ interface RouteContext {
 
 export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
+  const idError = validateId(id);
+  if (idError) return idError;
 
   // Personal key pasted into Settings (client component) and sent only on
   // this request — never logged, never persisted (see runMeeting/store).

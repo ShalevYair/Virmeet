@@ -2,6 +2,15 @@
 
 import { z } from 'zod';
 
+/**
+ * Every route param that names an entity (meeting/persona/meeting-type/file
+ * id) is a `randomUUID()` — validate it before it ever reaches
+ * `path.join`/`fs.rm` etc. (B2 in WORKPLAN.md). Not a security boundary on
+ * its own (Next.js normalizes the path too), but a one-line guard that turns
+ * a malformed id into a clean Hebrew 400 instead of an unexplained 404/500.
+ */
+export const idSchema = z.string().uuid();
+
 export const personaCreateSchema = z.object({
   name: z.string().min(1),
   role: z.string().min(1),

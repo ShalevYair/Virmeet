@@ -8,7 +8,7 @@ import { getMeeting, getOrgSettings, listMeetingTypes, listPersonas, updateMeeti
 import { runExtraction } from '@/lib/engine/runner';
 import { MeetingType, MODELS, Persona, TranscriptEntry } from '@/lib/types';
 import { estimateCallCostUsd } from '@/lib/pricing';
-import { internalError, jsonError, requireApiKey } from '../../../_lib/http';
+import { internalError, jsonError, requireApiKey, validateId } from '../../../_lib/http';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -25,6 +25,8 @@ function reconstructConvergenceSummary(transcript: TranscriptEntry[]): string {
 
 export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
+  const idError = validateId(id);
+  if (idError) return idError;
 
   const clientApiKey = req.headers.get('x-anthropic-api-key') || undefined;
   const apiKeyError = requireApiKey(clientApiKey);

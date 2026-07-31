@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPersona, saveUpload, setPersonaFiles } from '@/lib/store';
-import { internalError, jsonError } from '../../../_lib/http';
+import { internalError, jsonError, validateId } from '../../../_lib/http';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -8,6 +8,8 @@ interface RouteContext {
 
 export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
+  const idError = validateId(id);
+  if (idError) return idError;
   try {
     const persona = await getPersona(id);
     if (!persona) return jsonError('המשתתף לא נמצא.', 404);

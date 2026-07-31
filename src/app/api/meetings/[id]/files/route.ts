@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { deleteUpload, getMeeting, saveUpload, setMeetingFiles } from '@/lib/store';
-import { internalError, jsonError } from '../../../_lib/http';
+import { internalError, jsonError, validateId } from '../../../_lib/http';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -8,6 +8,8 @@ interface RouteContext {
 
 export async function POST(req: Request, { params }: RouteContext) {
   const { id } = await params;
+  const idError = validateId(id);
+  if (idError) return idError;
   try {
     const meeting = await getMeeting(id);
     if (!meeting) return jsonError('הפגישה לא נמצאה.', 404);
@@ -45,6 +47,8 @@ export async function DELETE(req: Request, { params }: RouteContext) {
   const { id } = await params;
   const fileId = new URL(req.url).searchParams.get('fileId');
   if (!fileId) return jsonError('חסר פרמטר fileId.', 400);
+  const idError = validateId(id) ?? validateId(fileId);
+  if (idError) return idError;
 
   try {
     const meeting = await getMeeting(id);

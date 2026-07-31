@@ -1,5 +1,5 @@
 import { getMeeting } from '@/lib/store';
-import { internalError, jsonError } from '../../../_lib/http';
+import { internalError, jsonError, validateId } from '../../../_lib/http';
 import { renderMarkdown } from './render';
 
 interface RouteContext {
@@ -8,6 +8,8 @@ interface RouteContext {
 
 export async function GET(req: Request, { params }: RouteContext) {
   const { id } = await params;
+  const idError = validateId(id);
+  if (idError) return idError;
   const format = new URL(req.url).searchParams.get('format') ?? 'md';
   if (format !== 'md' && format !== 'json') {
     return jsonError('פורמט הייצוא חייב להיות md או json.', 400);
