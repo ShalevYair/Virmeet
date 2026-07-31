@@ -199,6 +199,9 @@ export type CallUsageWithCost = NonNullable<TranscriptEntry['usage']>;
 
 export type RunEvent =
   | { type: 'phase'; phase: MeetingPhase }
+  // Sent right before a persona's model call starts — a UX cue only, never a
+  // source of truth (the polling fallback never sees it).
+  | { type: 'speaking'; speakerId: string; speakerName: string; round?: number }
   | { type: 'entry'; entry: TranscriptEntry }
   // `usage` is the extraction call's own usage — the only call in a run that
   // never produces a transcript entry (see runner.ts).
@@ -207,6 +210,7 @@ export type RunEvent =
 
 export interface RunMeetingHandlers {
   onPhase?: (phase: MeetingPhase) => void;
+  onSpeaking?: (speakerId: string, speakerName: string, round?: number) => void;
   onEntry?: (entry: TranscriptEntry) => void;
   onDone?: (result: MeetingResult, usage: CallUsageWithCost) => void;
   onError?: (message: string) => void;
@@ -274,6 +278,9 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
           switch (parsed.type) {
             case 'phase':
               handlers.onPhase?.(parsed.phase);
+              break;
+            case 'speaking':
+              handlers.onSpeaking?.(parsed.speakerId, parsed.speakerName, parsed.round);
               break;
             case 'entry':
               handlers.onEntry?.(parsed.entry);

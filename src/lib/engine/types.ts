@@ -13,6 +13,10 @@ export type CallUsageWithCost = CallModelUsage & { costUsd: number };
 /** Events streamed out of runMeeting() — mirrors the SSE payloads verbatim (spec §4, §5). */
 export type MeetingEvent =
   | { type: 'phase'; phase: PhaseName }
+  // Sent right before each persona model call starts (prep/discussion only —
+  // a UX cue for the 20-60s a turn can take, not a source of truth; the
+  // polling fallback never sees it. C2 in WORKPLAN.md.
+  | { type: 'speaking'; speakerId: string; speakerName: string; round?: number }
   | { type: 'entry'; entry: TranscriptEntry }
   // `usage` is the extraction call's own usage — the only model call in the
   // run that never produces a transcript entry, so callers accumulating cost

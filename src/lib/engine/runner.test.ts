@@ -198,6 +198,15 @@ describe('runMeeting', () => {
     // prep(2) + opening(1) + discussion(2) + convergence(1) + extraction(1) = 7 model calls.
     expect(final.usage.apiCalls).toBe(7);
     expect(final.usage.costUsd).toBeGreaterThan(0);
+
+    // A 'speaking' event precedes each persona call (prep + one discussion round = 4),
+    // never for the facilitator's opening/convergence/extraction calls.
+    const speakingEvents = events.filter((e) => e.type === 'speaking');
+    expect(speakingEvents).toHaveLength(4);
+    expect(speakingEvents.every((e) => e.type === 'speaking' && [a.id, b.id].includes(e.speakerId))).toBe(true);
+    const discussionSpeaking = speakingEvents.filter((e) => e.type === 'speaking' && e.round != null);
+    expect(discussionSpeaking).toHaveLength(2);
+    expect(discussionSpeaking.every((e) => e.type === 'speaking' && e.round === 1)).toBe(true);
   });
 
   it('a single persona failing in prep is logged and the meeting continues', async () => {
@@ -283,10 +292,14 @@ describe('runMeeting', () => {
     const meeting = makeMeeting([a.id, b.id], [mt.id], { discussionRounds: 2 });
 
     const { deps, getCurrent } = makeDeps(meeting, [a, b], [mt], happyPathCallModel(b.name));
-    await run(deps, meeting.id);
+    const events = await run(deps, meeting.id);
 
     const final = getCurrent();
     expect(final.status).toBe('completed');
+
+    // A skipped (budget-exhausted) turn never gets a 'speaking' event either.
+    const discussionSpeaking = events.filter((e) => e.type === 'speaking' && e.round != null);
+    expect(discussionSpeaking.every((e) => e.type === 'speaking' && e.speakerId === b.id)).toBe(true);
 
     const discussionEntries = final.transcript.filter((e) => e.phase === 'discussion');
     // persona a is exhausted right after prep (maxApiCalls: 1), so it never speaks in discussion.

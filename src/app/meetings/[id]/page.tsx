@@ -216,6 +216,39 @@ function TranscriptBubble({
   );
 }
 
+/** UX-only cue while a persona's turn is in flight (C2 in WORKPLAN.md) — not a source of truth. */
+function SpeakingBubble({
+  speakerId,
+  speakerName,
+  personaById,
+}: {
+  speakerId: string;
+  speakerName: string;
+  personaById: Map<string, Persona>;
+}) {
+  const color = personaById.get(speakerId)?.color ?? '#64748b';
+  return (
+    <div className="flex gap-3">
+      <PersonaAvatar name={speakerName} color={color} size={36} />
+      <div className="min-w-0 flex-1">
+        <span className="text-sm font-semibold">{speakerName}</span>
+        <div
+          className="mt-1.5 flex items-center gap-1.5 rounded-2xl rounded-tr-sm border border-black/10 bg-black/[0.02] px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.04]"
+          style={{ borderInlineStartWidth: 3, borderInlineStartColor: color }}
+        >
+          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-black/40 dark:bg-white/40" />
+          <span
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-black/40 [animation-delay:150ms] dark:bg-white/40"
+          />
+          <span
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-black/40 [animation-delay:300ms] dark:bg-white/40"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TaskCard({ task }: { task: MeetingTask }) {
   return (
     <Card className="flex flex-col gap-2 p-4">
@@ -385,6 +418,9 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [speaking, setSpeaking] = useState<{ speakerId: string; speakerName: string; round?: number } | null>(
+    null
+  );
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -443,9 +479,17 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
           setStatus('running');
           runMeeting(id, {
             signal: controller.signal,
-            onPhase: (phase) => setCurrentPhase(phase),
-            onEntry: (entry) => setTranscript((prev) => [...prev, entry]),
+            onPhase: (phase) => {
+              setCurrentPhase(phase);
+              setSpeaking(null);
+            },
+            onSpeaking: (speakerId, speakerName, round) => setSpeaking({ speakerId, speakerName, round }),
+            onEntry: (entry) => {
+              setTranscript((prev) => [...prev, entry]);
+              setSpeaking(null);
+            },
             onDone: async (res) => {
+              setSpeaking(null);
               setResult(res);
               setStatus('completed');
               stopPolling();
@@ -456,6 +500,7 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
               if (fresh) applyMeeting(fresh);
             },
             onError: async (message) => {
+              setSpeaking(null);
               setRunError(message);
               setStatus('failed');
               stopPolling();
@@ -603,13 +648,20 @@ export default function MeetingRunPage({ params }: { params: Promise<{ id: strin
 
       <Card className="flex flex-col gap-4 p-5">
         <h2 className="text-sm font-semibold">תמליל הפגישה</h2>
-        {transcript.length === 0 ? (
+        {transcript.length === 0 && !speaking ? (
           <p className="text-sm text-black/55 dark:text-white/55">התמליל עדיין ריק — הפגישה עומדת להתחיל.</p>
         ) : (
           <div className="flex flex-col gap-4">
             {transcript.map((entry) => (
               <TranscriptBubble key={entry.id} entry={entry} personaById={personaById} />
             ))}
+            {speaking && status === 'running' && (
+              <SpeakingBubble
+                speakerId={speaking.speakerId}
+                speakerName={speaking.speakerName}
+                personaById={personaById}
+              />
+            )}
           </div>
         )}
       </Card>

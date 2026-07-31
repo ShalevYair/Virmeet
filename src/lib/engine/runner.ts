@@ -295,6 +295,7 @@ export async function runMeeting(
 
   const prepAttempts = await Promise.allSettled(
     participants.map(async (persona) => {
+      onEvent({ type: 'speaking', speakerId: persona.id, speakerName: persona.name });
       recordApiCall();
       try {
         const result = await deps.callModel({
@@ -435,6 +436,7 @@ export async function runMeeting(
         continue;
       }
 
+      onEvent({ type: 'speaking', speakerId: persona.id, speakerName: persona.name, round });
       recordApiCall();
       try {
         const result = await deps.callModel({
