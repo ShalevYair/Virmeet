@@ -42,6 +42,20 @@ export interface RunMeetingDeps {
    * exercise creator participation never need it.
    */
   requestCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string>;
+  /**
+   * Refreshes one persona's Drive knowledge-folder index (see
+   * engine/drive-knowledge.ts) right before `prep` starts. Called once per
+   * participant that has `persona.driveFolderId` set. Throws on failure
+   * (no Drive session, network error, ...) — the runner catches per-persona
+   * and degrades gracefully, same as every other per-persona failure.
+   * Optional: omitted entirely disables Drive knowledge refresh (e.g. in
+   * tests that don't exercise it).
+   */
+  refreshDriveKnowledge?: (
+    folderId: string,
+    apiKey: string | undefined,
+    signal: AbortSignal | undefined
+  ) => Promise<{ changedCount: number; totalCount: number; truncated: boolean }>;
 }
 
 export interface PrepOutput {

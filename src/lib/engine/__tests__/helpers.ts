@@ -102,6 +102,7 @@ export function makeDeps(options: {
   org?: OrgSettings;
   callModel?: CallModelFn;
   requestCreatorTurn?: RunMeetingDeps['requestCreatorTurn'];
+  refreshDriveKnowledge?: RunMeetingDeps['refreshDriveKnowledge'];
 }): TestDeps {
   let current = options.meeting;
   const patches: Partial<Meeting>[] = [];
@@ -138,6 +139,7 @@ export function makeDeps(options: {
       return options.org ?? makeOrg();
     },
     requestCreatorTurn: options.requestCreatorTurn,
+    refreshDriveKnowledge: options.refreshDriveKnowledge,
   };
 }
 

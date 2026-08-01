@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { callModel as realCallModel } from '../gemini';
 import { CallModelResult } from '../llm-types';
+import { getDriveAccessToken } from '../drive-session';
 import {
   getMeeting as storeGetMeeting,
   getOrgSettings as storeGetOrgSettings,
@@ -24,6 +25,7 @@ import {
   updateMeeting as storeUpdateMeeting,
 } from '../store';
 import { CallBudget } from './budget';
+import { refreshPersonaDriveIndex } from './drive-knowledge';
 import * as prompts from './prompts';
 import { EXTRACTION_SCHEMA, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
 import { OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
@@ -35,6 +37,13 @@ const defaultDeps: RunMeetingDeps = {
   getPersonas: storeListPersonas,
   getMeetingTypes: storeListMeetingTypes,
   getOrgSettings: storeGetOrgSettings,
+  refreshDriveKnowledge: (folderId, apiKey, signal) => {
+    const token = getDriveAccessToken();
+    if (!token) {
+      return Promise.reject(new Error('אין חיבור פעיל ל-Drive (יש להתחבר מחדש בהגדרות).'));
+    }
+    return refreshPersonaDriveIndex(token, folderId, realCallModel, apiKey, signal);
+  },
 };
 
 // The model reports ownerName as UNASSIGNED_OWNER_NAME when it can't tie a
@@ -217,6 +226,44 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   if (await abortIfCancelled('prep')) return;
   await emitPhase('prep');
+
+  // Refresh each Drive-connected participant's knowledge-folder index
+  // before anyone's prep call runs — sequential and synchronous with this
+  // phase (not a model call, so it doesn't touch budget/usage). A failure
+  // here degrades that one persona back to whatever local files it already
+  // has; it never fails the meeting.
+  if (deps.refreshDriveKnowledge) {
+    for (const persona of participants) {
+      if (!persona.driveFolderId) continue;
+      if (await abortIfCancelled('prep')) return;
+      try {
+        const refresh = await deps.refreshDriveKnowledge(persona.driveFolderId, apiKey, signal);
+        const truncatedNote = refresh.truncated
+          ? ' (הגיע למגבלת העדכונים לריצה אחת — חלק מהקבצים לא עודכנו הפעם)'
+          : '';
+        await emitEntry(
+          makeEntry(
+            'prep',
+            'system',
+            'מערכת',
+            `אינדקס הידע של ${persona.name} מ-Drive עודכן — ${refresh.changedCount} קבצים חדשים/עודכנו מתוך ${refresh.totalCount}.${truncatedNote}`
+          )
+        );
+      } catch (err) {
+        if (!isAborted()) {
+          await emitEntry(
+            makeEntry(
+              'prep',
+              'system',
+              'מערכת',
+              `רענון אינדקס הידע של ${persona.name} מ-Drive נכשל (${errorMessage(err)}). ממשיכים בלעדיו.`
+            )
+          );
+        }
+      }
+    }
+  }
+
   const prepResults = new Map<string, PrepOutput>();
 
   const prepAttempts = await Promise.allSettled(
