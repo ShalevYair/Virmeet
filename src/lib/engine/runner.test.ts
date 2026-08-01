@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Meeting } from '../types';
+import type { Meeting, Persona } from '../types';
 import { CallModelResult } from '../llm-types';
 import {
   makeCallModelResult,
@@ -74,11 +74,19 @@ function happyPathResponses(extractedTitle?: string): CallModelResult[] {
 
 async function runHappyPath(
   meetingOverrides: Partial<Meeting> = {},
-  depsOverrides: { requestCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string> } = {},
+  depsOverrides: {
+    requestCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string>;
+    refreshDriveKnowledge?: (
+      folderId: string,
+      apiKey: string | undefined,
+      signal: AbortSignal | undefined
+    ) => Promise<{ changedCount: number; totalCount: number; truncated: boolean }>;
+    personaOverrides?: [Partial<Persona>?, Partial<Persona>?];
+  } = {},
   extractedTitle?: string
 ) {
-  const p1 = makePersona({ name: 'א' });
-  const p2 = makePersona({ name: 'ב' });
+  const p1 = makePersona({ name: 'א', ...depsOverrides.personaOverrides?.[0] });
+  const p2 = makePersona({ name: 'ב', ...depsOverrides.personaOverrides?.[1] });
   const meetingType = makeMeetingType();
   const meeting = makeMeeting({
     title: '',
@@ -95,6 +103,7 @@ async function runHappyPath(
     org: makeOrg(),
     callModel: scriptedCallModel(happyPathResponses(extractedTitle)),
     requestCreatorTurn: depsOverrides.requestCreatorTurn,
+    refreshDriveKnowledge: depsOverrides.refreshDriveKnowledge,
   });
 
   const events: MeetingEvent[] = [];
@@ -168,5 +177,60 @@ describe('creator participation in discussion rounds', () => {
     const finalMeeting = await runHappyPath({ creatorParticipates: true });
     expect(finalMeeting.status).toBe('completed');
     expect(finalMeeting.transcript.some((e) => e.speakerId === 'creator')).toBe(false);
+  });
+});
+
+describe('Drive knowledge refresh before prep', () => {
+  it('refreshes the index for every participant with a driveFolderId, before any prep call, and logs a system line', async () => {
+    const calls: string[] = [];
+    const finalMeeting = await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }, { driveFolderId: 'folder-b' }],
+        refreshDriveKnowledge: async (folderId) => {
+          calls.push(folderId);
+          return { changedCount: 2, totalCount: 3, truncated: false };
+        },
+      }
+    );
+
+    expect(calls).toEqual(['folder-a', 'folder-b']);
+    const driveLines = finalMeeting.transcript.filter((e) => e.text.includes('אינדקס הידע'));
+    expect(driveLines).toHaveLength(2);
+    expect(driveLines[0].text).toContain('2 קבצים חדשים/עודכנו מתוך 3');
+    expect(driveLines[0].phase).toBe('prep');
+    // Both Drive refresh lines land before the first real prep transcript entry.
+    const firstPrepIndex = finalMeeting.transcript.findIndex((e) => e.speakerId === finalMeeting.participantIds[0]);
+    expect(finalMeeting.transcript.indexOf(driveLines[1])).toBeLessThan(firstPrepIndex);
+  });
+
+  it('never calls refreshDriveKnowledge for a participant without a driveFolderId', async () => {
+    let called = false;
+    await runHappyPath(
+      {},
+      {
+        refreshDriveKnowledge: async () => {
+          called = true;
+          return { changedCount: 0, totalCount: 0, truncated: false };
+        },
+      }
+    );
+    expect(called).toBe(false);
+  });
+
+  it('logs a failure line and keeps going when refreshDriveKnowledge rejects, instead of failing the meeting', async () => {
+    const finalMeeting = await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }],
+        refreshDriveKnowledge: async () => {
+          throw new Error('אין חיבור פעיל ל-Drive');
+        },
+      }
+    );
+
+    expect(finalMeeting.status).toBe('completed');
+    const failureLine = finalMeeting.transcript.find((e) => e.text.includes('רענון אינדקס הידע'));
+    expect(failureLine?.text).toContain('אין חיבור פעיל ל-Drive');
   });
 });

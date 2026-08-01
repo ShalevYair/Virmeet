@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createFileMetadata,
   createFolder,
+  downloadFileMedia,
+  downloadFileText,
   ensureFolder,
   ensurePersonaFolder,
   ensureVirmeetRootFolder,
   escapeDriveQueryValue,
+  findFile,
   findFolder,
+  listFolderFiles,
+  updateFileContent,
+  upsertTextFile,
 } from './drive';
 import type { FetchFn } from './drive';
 
@@ -101,5 +108,89 @@ describe('ensureVirmeetRootFolder / ensurePersonaFolder', () => {
     const result = await ensurePersonaFolder('token', 'root-folder-id', 'ארכיטקט תוכנה', fetchFn);
     expect(result).toEqual({ id: 'persona-folder-id', created: true });
     expect(decodeURIComponent(searchUrl)).toContain("'root-folder-id' in parents");
+  });
+});
+
+describe('listFolderFiles', () => {
+  it('excludes folders from the query and returns id/name/modifiedTime', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () =>
+      jsonResponse({ files: [{ id: 'f1', name: 'a.pdf', modifiedTime: '2026-01-01T00:00:00.000Z' }] })
+    );
+    const files = await listFolderFiles('token', 'folder-id', fetchFn);
+    expect(files).toEqual([{ id: 'f1', name: 'a.pdf', modifiedTime: '2026-01-01T00:00:00.000Z' }]);
+    const [url] = fetchFn.mock.calls[0];
+    expect(decodeURIComponent(String(url))).toContain("mimeType!='application/vnd.google-apps.folder'");
+  });
+});
+
+describe('findFile', () => {
+  it('returns the id of the first matching non-folder file', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => jsonResponse({ files: [{ id: 'idx-1' }] }));
+    const id = await findFile('token', '_virmeet-index.md', 'folder-id', fetchFn);
+    expect(id).toBe('idx-1');
+  });
+
+  it('returns null when nothing matches', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => jsonResponse({ files: [] }));
+    expect(await findFile('token', '_virmeet-index.md', 'folder-id', fetchFn)).toBeNull();
+  });
+});
+
+describe('downloadFileMedia / downloadFileText', () => {
+  it('fetches ?alt=media and decodes text', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => new Response('שלום עולם'));
+    const text = await downloadFileText('token', 'file-id', fetchFn);
+    expect(text).toBe('שלום עולם');
+    const [url] = fetchFn.mock.calls[0];
+    expect(String(url)).toContain('alt=media');
+  });
+
+  it('throws a Hebrew error on a non-OK download', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => new Response('nope', { status: 404, statusText: 'Not Found' }));
+    await expect(downloadFileMedia('token', 'file-id', fetchFn)).rejects.toThrow(/404/);
+  });
+});
+
+describe('createFileMetadata / updateFileContent / upsertTextFile', () => {
+  it('createFileMetadata POSTs name/parents/mimeType and returns the new id', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => jsonResponse({ id: 'new-file-id' }));
+    const id = await createFileMetadata('token', '_virmeet-index.md', 'folder-id', 'text/markdown', fetchFn);
+    expect(id).toBe('new-file-id');
+    const [, opts] = fetchFn.mock.calls[0];
+    const body = JSON.parse((opts as RequestInit).body as string);
+    expect(body).toMatchObject({ name: '_virmeet-index.md', mimeType: 'text/markdown', parents: ['folder-id'] });
+  });
+
+  it('updateFileContent PATCHes the upload endpoint with the raw content', async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => new Response('{}'));
+    await updateFileContent('token', 'file-id', '# hello', 'text/markdown', fetchFn);
+    const [url, opts] = fetchFn.mock.calls[0];
+    expect(String(url)).toContain('/upload/drive/v3/files/file-id');
+    expect((opts as RequestInit).method).toBe('PATCH');
+    expect((opts as RequestInit).body).toBe('# hello');
+  });
+
+  it('upsertTextFile updates an existing file in place instead of creating a duplicate', async () => {
+    const calls: string[] = [];
+    const fetchFn = vi.fn<FetchFn>(async (url, opts) => {
+      calls.push(`${(opts as RequestInit | undefined)?.method ?? 'GET'} ${String(url).split('?')[0]}`);
+      if (String(url).includes('/files?')) return jsonResponse({ files: [{ id: 'existing-id' }] });
+      return new Response('{}');
+    });
+    const id = await upsertTextFile('token', '_virmeet-index.md', 'folder-id', '# content', 'text/markdown', fetchFn);
+    expect(id).toBe('existing-id');
+    expect(calls.some((c) => c.includes('upload/drive/v3/files/existing-id'))).toBe(true);
+    expect(calls.every((c) => !c.startsWith('POST https://www.googleapis.com/drive/v3/files'))).toBe(true);
+  });
+
+  it('upsertTextFile creates the file first when it does not exist yet', async () => {
+    const fetchFn = vi.fn<FetchFn>(async (url, opts) => {
+      const method = (opts as RequestInit | undefined)?.method ?? 'GET';
+      if (String(url).includes('/files?')) return jsonResponse({ files: [] });
+      if (method === 'POST') return jsonResponse({ id: 'brand-new-id' });
+      return new Response('{}');
+    });
+    const id = await upsertTextFile('token', '_virmeet-index.md', 'folder-id', '# content', 'text/markdown', fetchFn);
+    expect(id).toBe('brand-new-id');
   });
 });
