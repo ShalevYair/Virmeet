@@ -1,8 +1,8 @@
 // Virmeet — JSON schemas for structured model output (spec §0, §4).
-// Every schema here is passed verbatim as `output_config.format.schema` to
-// callModel(). Anthropic's structured-output mode requires
-// `additionalProperties: false` and every property listed in `required` —
-// both are enforced on every object below, including nested ones.
+// Every schema here is passed verbatim as `responseJsonSchema` to callModel().
+// Gemini's structured-output mode requires `additionalProperties: false` and
+// every property listed in `required` — both are enforced on every object
+// below, including nested ones.
 
 /** Phase 0 (`prep`) — one persona's private read of the meeting, unseen by peers. */
 export const PREP_SCHEMA = {

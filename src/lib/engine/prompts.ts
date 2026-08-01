@@ -5,12 +5,12 @@
 // [orgBlock, sharedFilesBlock, facilitatorPrompt] for the facilitator — and
 // none of those change during a meeting run; only `messages` (the user turn)
 // changes between prep/opening/discussion calls. That stability is what lets
-// prompt caching hit across every call of a meeting, persona and facilitator
-// alike, since [orgBlock, sharedFilesBlock] is now an identical prefix for
-// both. `sharedFilesBlock` carries its own cache breakpoint (see
-// llm-types.ts#SystemBlock) so the shared files are cached once instead of
-// once per persona. Do not fold per-phase or per-round content into the
-// system blocks.
+// Gemini's implicit context caching hit across every call of a meeting,
+// persona and facilitator alike, since [orgBlock, sharedFilesBlock] is an
+// identical prefix for both. Unlike explicit cache-breakpoint APIs, Gemini
+// caches automatically — there's nothing to mark, only a shared prefix to
+// preserve. Do not fold per-phase or per-round content into the system
+// blocks.
 
 import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { SystemBlock } from '../llm-types';
@@ -72,11 +72,11 @@ function buildFilesBlock(files: Persona['files'] | Meeting['files'], heading: st
 const SHARED_FILES_HEADING = '# קבצי רקע משותפים לכל משתתפי הפגישה';
 const PRIVATE_FILES_HEADING = '# קבצי רקע פרטיים שלך (אף אחד אחר לא רואה אותם)';
 
-/** [orgBlock, sharedFilesBlock, personaPrompt, personaFilesBlock] — stable for the whole meeting; sharedFilesBlock carries its own cache breakpoint. */
+/** [orgBlock, sharedFilesBlock, personaPrompt, personaFilesBlock] — stable for the whole meeting. */
 export function buildPersonaSystemBlocks(org: OrgSettings, persona: Persona, meeting: Meeting): SystemBlock[] {
   return [
     { type: 'text', text: buildOrgBlock(org) },
-    { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING), cacheBreakpoint: true },
+    { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING) },
     { type: 'text', text: persona.prompt },
     { type: 'text', text: buildFilesBlock(persona.files, PRIVATE_FILES_HEADING) },
   ];
@@ -91,7 +91,7 @@ const FACILITATOR_ROLE_PROMPT = `אתה המנחה (facilitator) של הפגיש
 export function buildFacilitatorSystemBlocks(org: OrgSettings, meeting: Meeting): SystemBlock[] {
   return [
     { type: 'text', text: buildOrgBlock(org) },
-    { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING), cacheBreakpoint: true },
+    { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING) },
     { type: 'text', text: FACILITATOR_ROLE_PROMPT },
   ];
 }

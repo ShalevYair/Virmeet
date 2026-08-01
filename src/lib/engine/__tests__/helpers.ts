@@ -3,6 +3,7 @@
 // only picks up src/**/*.test.ts, so this module is safe to import without
 // vitest trying to run it as a suite.
 
+import { DEFAULT_MODEL } from '@/lib/types';
 import type { Meeting, MeetingType, OrgSettings, Persona } from '@/lib/types';
 import type { CallModelFn, RunMeetingDeps } from '@/lib/engine/types';
 import type { CallModelResult } from '@/lib/llm-types';
@@ -22,7 +23,6 @@ export function makePersona(overrides: Partial<Persona> = {}): Persona {
     organization: 'ארגון',
     color: '#334155',
     prompt: 'פרומפט פרסונה',
-    model: 'claude-sonnet-5',
     webAccess: false,
     maxApiCalls: 10,
     maxWebSearches: 0,
@@ -66,6 +66,7 @@ export function makeMeeting(overrides: Partial<Meeting> = {}): Meeting {
     meetingTypeIds: [],
     objective: 'מטרת הפגישה',
     participantIds: [],
+    model: DEFAULT_MODEL,
     files: [],
     discussionRounds: 2,
     status: 'draft',

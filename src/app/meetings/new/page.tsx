@@ -4,12 +4,16 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
-import { getModelProvider, type MeetingType, type ModelProvider, type Persona } from '@/lib/types';
+import { AVAILABLE_MODELS, DEFAULT_MODEL, type AvailableModel, type MeetingType, type Persona } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 import { getStoredApiKey } from '@/lib/api-key';
 
-const PROVIDER_LABELS: Record<ModelProvider, string> = { anthropic: 'Anthropic', gemini: 'Gemini' };
+const MODEL_LABELS: Record<AvailableModel, { title: string; hint: string }> = {
+  'gemini-3.1-pro-preview': { title: 'Gemini Pro', hint: 'הכי חזק — לדיונים מורכבים שדורשים איכות מקסימלית' },
+  'gemini-3.6-flash': { title: 'Gemini Flash', hint: 'מאוזן — מהירות וזמן תגובה מול איכות (ברירת מחדל)' },
+  'gemini-3.5-flash-lite': { title: 'Gemini Flash-Lite', hint: 'הכי מהיר וזול — לפגישות עם הרבה משתתפים/סבבים' },
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} בייט`;
@@ -28,6 +32,7 @@ export default function NewMeetingPage() {
   const [selectedTypeIds, setSelectedTypeIds] = useState<string[]>([]);
   const [objective, setObjective] = useState('');
   const [participantIds, setParticipantIds] = useState<string[]>([]);
+  const [model, setModel] = useState<AvailableModel>(DEFAULT_MODEL);
   const [discussionRounds, setDiscussionRounds] = useState(2);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -36,10 +41,7 @@ export default function NewMeetingPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
 
-  const [browserKeys, setBrowserKeys] = useState<Record<ModelProvider, boolean>>({
-    anthropic: true,
-    gemini: true,
-  });
+  const [hasGeminiKey, setHasGeminiKey] = useState(true);
 
   function load() {
     setLoadError(null);
@@ -54,26 +56,10 @@ export default function NewMeetingPage() {
   useEffect(load, []);
 
   useEffect(() => {
-    setBrowserKeys({
-      anthropic: Boolean(getStoredApiKey('anthropic')),
-      gemini: Boolean(getStoredApiKey('gemini')),
-    });
+    setHasGeminiKey(Boolean(getStoredApiKey()));
   }, []);
 
   const activePersonas = useMemo(() => (personas ?? []).filter((p) => p.isActive), [personas]);
-
-  // The facilitator can run on either provider (whichever key is available —
-  // see pickFacilitatorModel), so it doesn't add its own hard requirement
-  // here. We only warn about providers this meeting's *participants*
-  // actually need. There's no server key anymore — only what's in this
-  // browser's localStorage (see api-key.ts).
-  const missingProviders = useMemo(() => {
-    const needed = new Set<ModelProvider>();
-    for (const p of activePersonas) {
-      if (participantIds.includes(p.id)) needed.add(getModelProvider(p.model));
-    }
-    return [...needed].filter((provider) => !browserKeys[provider]);
-  }, [activePersonas, participantIds, browserKeys]);
 
   function toggleType(id: string) {
     setSelectedTypeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -108,6 +94,7 @@ export default function NewMeetingPage() {
         meetingTypeIds: selectedTypeIds,
         objective,
         participantIds,
+        model,
         discussionRounds,
       });
       for (const file of stagedFiles) {
@@ -308,6 +295,34 @@ export default function NewMeetingPage() {
       </Card>
 
       <Card className="flex flex-col gap-3 p-5">
+        <h2 className="text-sm font-semibold">מודל</h2>
+        <p className="text-xs text-black/50 dark:text-white/50">
+          המודל שישמש את כל המשתתפים והמנחה בפגישה הזו.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {AVAILABLE_MODELS.map((m) => {
+            const selected = model === m;
+            const label = MODEL_LABELS[m];
+            return (
+              <button key={m} type="button" onClick={() => setModel(m)} className="text-right">
+                <Card
+                  className={`flex h-full flex-col gap-1 p-4 transition-shadow hover:shadow-md ${
+                    selected ? 'ring-2 ring-blue-500' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">{label.title}</p>
+                    {selected && <Badge tone="info">נבחר</Badge>}
+                  </div>
+                  <p className="text-sm text-black/60 dark:text-white/60">{label.hint}</p>
+                </Card>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-5">
         <h2 className="text-sm font-semibold">מספר סבבי דיון</h2>
         <div className="flex gap-2">
           {[1, 2, 3, 4].map((n) => (
@@ -327,16 +342,12 @@ export default function NewMeetingPage() {
         </div>
       </Card>
 
-      {missingProviders.length > 0 && (
+      {!hasGeminiKey && (
         <ErrorBanner
-          message={`לא נמצא מפתח API של ${missingProviders
-            .map((p) => PROVIDER_LABELS[p])
-            .join(' וגם ')} — לא בשרת ולא בדפדפן הזה. הריצה תיכשל עבור המשתתפים שמשתמשים במודל של ${
-            missingProviders.length > 1 ? 'הספקים האלה' : 'ספק זה'
-          }. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה.`}
+          message="לא נמצא מפתח API של Gemini בדפדפן הזה. הריצה תיכשל. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה."
         />
       )}
-      {missingProviders.length > 0 && (
+      {!hasGeminiKey && (
         <p className="-mt-4 text-sm">
           <Link href="/settings/" className="text-blue-600 hover:underline dark:text-blue-400">
             מעבר להגדרות כדי להזין מפתח API

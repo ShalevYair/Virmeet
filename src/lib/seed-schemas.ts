@@ -17,7 +17,6 @@ export const personaSeedSchema = z.object({
   organization: z.string().min(1),
   color: z.string().min(1),
   prompt: z.string().min(1),
-  model: z.string().min(1),
   webAccess: z.boolean(),
   maxApiCalls: z.number().int().min(1).max(20),
   maxWebSearches: z.number().int().min(0).max(10),

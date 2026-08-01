@@ -9,11 +9,11 @@
 // prompt change made personas sound more distinct, not a shipped feature.
 //
 // Usage: npm run eval:attribution -- <exported-meeting.json> [--seed=N]
-// Requires ANTHROPIC_API_KEY and/or GEMINI_API_KEY in the environment.
+// Requires GEMINI_API_KEY in the environment.
 
 import { readFileSync } from 'node:fs';
 import { buildAttributionInput, runAttributionTest, scoreAttribution } from '../src/lib/eval/attribution';
-import { getModelProvider, pickFacilitatorModel } from '../src/lib/types';
+import { DEFAULT_MODEL } from '../src/lib/types';
 import type { Meeting } from '../src/lib/types';
 import type { AttributionParticipant } from '../src/lib/eval/attribution';
 
@@ -54,14 +54,12 @@ async function main(): Promise<void> {
     fail(`הפגישה בקובץ במצב "${raw.meeting.status}", לא "completed" — אין תמליל דיון מלא לבדוק.`);
   }
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY || undefined;
-  const geminiKey = process.env.GEMINI_API_KEY || undefined;
-  if (!anthropicKey && !geminiKey) {
-    fail('יש להגדיר ANTHROPIC_API_KEY או GEMINI_API_KEY בסביבה כדי להריץ את מבחן הייחוס.');
+  const apiKey = process.env.GEMINI_API_KEY || undefined;
+  if (!apiKey) {
+    fail('יש להגדיר GEMINI_API_KEY בסביבה כדי להריץ את מבחן הייחוס.');
   }
 
-  const model = pickFacilitatorModel({ anthropic: anthropicKey, gemini: geminiKey });
-  const apiKey = getModelProvider(model) === 'gemini' ? geminiKey : anthropicKey;
+  const model = DEFAULT_MODEL;
 
   const input = buildAttributionInput(raw.meeting.transcript, raw.participants, seed);
   if (input.items.length === 0) {

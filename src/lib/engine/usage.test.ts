@@ -66,7 +66,7 @@ async function runHappyPath(meetingOverrides: Partial<Meeting> = {}) {
   });
 
   const events: MeetingEvent[] = [];
-  await runMeeting(meeting.id, (e) => events.push(e), deps, {});
+  await runMeeting(meeting.id, (e) => events.push(e), deps, undefined);
   const finalMeeting = (await deps.getMeeting(meeting.id)) as Meeting;
   return finalMeeting;
 }

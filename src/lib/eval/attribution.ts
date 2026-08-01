@@ -11,7 +11,7 @@
 // here touches file/context caching.
 
 import type { TranscriptEntry } from '../types';
-import { callModel } from '../llm';
+import { callModel } from '../gemini';
 
 /** Just enough persona data for the judge — never `prompt`, files, or anything from `prep`. */
 export interface AttributionParticipant {
@@ -119,9 +119,8 @@ function buildAttributionPrompt(items: AttributionItem[], participants: Attribut
 }
 
 /**
- * Runs the attribution test as a single model call through llm.ts#callModel
- * (works against whichever provider `opts.model` belongs to). The judge only
- * ever sees participant names/roles and the shuffled item text — never
+ * Runs the attribution test as a single model call through gemini.ts#callModel.
+ * The judge only ever sees participant names/roles and the shuffled item text — never
  * `persona.prompt`, private files, or the `prep` phase, which would let the
  * judge match prompt-to-output instead of actually discriminating voices.
  */
