@@ -66,6 +66,7 @@ export function makeMeeting(overrides: Partial<Meeting> = {}): Meeting {
     meetingTypeIds: [],
     objective: 'מטרת הפגישה',
     participantIds: [],
+    creatorParticipates: false,
     model: DEFAULT_MODEL,
     files: [],
     discussionRounds: 2,
@@ -100,6 +101,7 @@ export function makeDeps(options: {
   meetingTypes?: MeetingType[];
   org?: OrgSettings;
   callModel?: CallModelFn;
+  requestCreatorTurn?: RunMeetingDeps['requestCreatorTurn'];
 }): TestDeps {
   let current = options.meeting;
   const patches: Partial<Meeting>[] = [];
@@ -135,6 +137,7 @@ export function makeDeps(options: {
     async getOrgSettings() {
       return options.org ?? makeOrg();
     },
+    requestCreatorTurn: options.requestCreatorTurn,
   };
 }
 

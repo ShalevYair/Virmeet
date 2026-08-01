@@ -95,10 +95,11 @@ export interface MeetingResult {
 
 export interface Meeting {
   id: string;
-  title: string;
+  title: string; // ריק עד שהפגישה מסתיימת — המנחה קובע כותרת בשלב extraction
   meetingTypeIds: string[]; // לפחות אחד
   objective: string; // טקסט חופשי: מה רוצים להשיג / מה בונים
   participantIds: string[]; // לפחות 2
+  creatorParticipates: boolean; // האם יוצר הפגישה (המשתמש) משתתף בעצמו בכל סבב דיון
   model: AvailableModel; // המודל שישמש את כל המשתתפים והמנחה בפגישה זו
   files: AttachedFile[]; // קבצי רקע משותפים
   discussionRounds: number; // 1-4, ברירת מחדל 2

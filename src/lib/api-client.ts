@@ -189,10 +189,10 @@ export const orgApi = {
 // ---------------------------------------------------------------------------
 
 export type MeetingCreateInput = {
-  title: string;
   meetingTypeIds: string[];
   objective: string;
   participantIds: string[];
+  creatorParticipates?: boolean;
   model: AvailableModel;
   discussionRounds?: number;
 };
@@ -222,14 +222,16 @@ export const meetingsApi = {
   get: (id: string) => run(async () => (await store.getMeeting(id)) ?? notFound('הפגישה לא נמצאה.')),
   create: (input: MeetingCreateInput) =>
     run(async () => {
-      requireNonEmpty(input.title, 'כותרת');
       requireNonEmpty(input.objective, 'מטרה');
       if (input.meetingTypeIds.length < 1) badRequest('יש לבחור לפחות סוג פגישה אחד.');
       if (input.participantIds.length < 2) badRequest('יש לבחור לפחות שני משתתפים.');
       if (!isKnownModel(input.model)) badRequest('המודל שנבחר אינו נתמך.');
       if (input.discussionRounds !== undefined) requireIntInRange(input.discussionRounds, 1, 4, 'מספר סבבי דיון');
       await assertParticipantsAndTypesExist(input.participantIds, input.meetingTypeIds);
-      return store.createMeeting(input);
+      // Title is intentionally not user-supplied — the facilitator generates
+      // one from what was actually discussed once extraction completes (see
+      // engine/runner.ts).
+      return store.createMeeting({ ...input, title: '' });
     }),
   update: (id: string, patch: MeetingUpdateInput) =>
     run(async () => {
@@ -302,6 +304,8 @@ export interface RunMeetingHandlers {
   onDone?: (result: MeetingResult) => void;
   onError?: (message: string) => void;
   onCancelled?: () => void;
+  /** Only called when the meeting has `creatorParticipates: true` — see engine/runner.ts. */
+  onCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string>;
   signal?: AbortSignal;
 }
 
@@ -392,7 +396,7 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
           break;
       }
     },
-    {},
+    { requestCreatorTurn: handlers.onCreatorTurn },
     geminiKey,
     handlers.signal
   );

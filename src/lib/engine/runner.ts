@@ -453,6 +453,18 @@ export async function runMeeting(
         }
       }
     }
+
+    // The meeting creator (a human, not a persona) gets one turn per round,
+    // after every persona has spoken — never billed against usage/budget,
+    // since it isn't a model call. `requestCreatorTurn` resolves with '' if
+    // the creator skips the round.
+    if (meeting.creatorParticipates && deps.requestCreatorTurn) {
+      if (await abortIfCancelled('discussion', round)) return;
+      const creatorText = (await deps.requestCreatorTurn({ round, totalRounds })).trim();
+      if (creatorText) {
+        await emitEntry(makeEntry('discussion', 'creator', 'יוצר הפגישה', creatorText, { round }));
+      }
+    }
   }
 
   // -------------------------------------------------------------------
@@ -561,7 +573,8 @@ export async function runMeeting(
       }),
     };
 
-    await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null });
+    const title = raw.title.trim() || meeting.title;
+    await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null, title });
     onEvent({ type: 'done', result: finalResult });
   } catch (err) {
     const message = errorMessage(err);

@@ -18,7 +18,7 @@ import {
   type Persona,
   type TranscriptEntry,
 } from '@/lib/types';
-import { Badge, Button, Card, ErrorBanner, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, ErrorBanner, Skeleton, inputClasses } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 
@@ -54,6 +54,7 @@ const PRIORITY_TONE: Record<MeetingTask['priority'], 'danger' | 'warning' | 'neu
 };
 
 const FACILITATOR_COLOR = '#334155';
+const CREATOR_COLOR = '#7c3aed';
 
 // A run whose engine died with its tab (closed mid-meeting) leaves the
 // meeting stuck in 'running' forever — nothing else ever updates it. Chosen
@@ -157,9 +158,10 @@ function TranscriptBubble({
   }
 
   const isFacilitator = entry.speakerId === 'facilitator';
+  const isCreator = entry.speakerId === 'creator';
   const persona = personaById.get(entry.speakerId);
-  const color = isFacilitator ? FACILITATOR_COLOR : persona?.color ?? '#64748b';
-  const name = entry.speakerName || (isFacilitator ? 'מנחה' : 'דובר');
+  const color = isFacilitator ? FACILITATOR_COLOR : isCreator ? CREATOR_COLOR : persona?.color ?? '#64748b';
+  const name = entry.speakerName || (isFacilitator ? 'מנחה' : isCreator ? 'אתה (יוצר הפגישה)' : 'דובר');
 
   return (
     <div className="flex gap-3">
@@ -379,6 +381,10 @@ function MeetingRunInner({ id }: { id: string }) {
   const [starting, setStarting] = useState(false);
   const [usage, setUsage] = useState<Meeting['usage'] | null>(null);
   const [staleRunning, setStaleRunning] = useState(false);
+  const [creatorTurnRequest, setCreatorTurnRequest] = useState<
+    { round: number; totalRounds: number; resolve: (text: string) => void } | null
+  >(null);
+  const [creatorDraft, setCreatorDraft] = useState('');
 
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -456,9 +462,22 @@ function MeetingRunInner({ id }: { id: string }) {
     }
     const controller = new AbortController();
     abortRef.current = controller;
+    // A creator turn awaiting input must never hang forever if the run is
+    // cancelled out from under it — resolve it with '' (skip) right away.
+    controller.signal.addEventListener('abort', () => {
+      setCreatorTurnRequest((prev) => {
+        prev?.resolve('');
+        return null;
+      });
+    });
     setStatus('running');
     await runMeeting(id, {
       signal: controller.signal,
+      onCreatorTurn: (info) =>
+        new Promise<string>((resolve) => {
+          setCreatorDraft('');
+          setCreatorTurnRequest({ ...info, resolve });
+        }),
       onPhase: (phase) => {
         setCurrentPhase(phase);
         // TranscriptEntry.usage is populated per-line, but system lines carry
@@ -555,15 +574,20 @@ function MeetingRunInner({ id }: { id: string }) {
   // Downloads the DOCX summary automatically the moment a meeting this tab
   // was watching finishes running — not on every visit to an already-
   // completed meeting's page (guarded by wasLiveRef/autoDownloadedRef above).
+  // Fetches the just-persisted record instead of merging local state: the
+  // extraction-generated title (see engine/runner.ts) lands in storage
+  // before the 'done' event fires, but local `meeting` state only picks it
+  // up via a separate reconciliation step that can still be pending here.
   useEffect(() => {
-    if (status !== 'completed' || !meeting || !result || !wasLiveRef.current || autoDownloadedRef.current) return;
+    if (status !== 'completed' || !wasLiveRef.current || autoDownloadedRef.current) return;
     autoDownloadedRef.current = true;
-    downloadMeetingDocx({ ...meeting, transcript, usage: usage ?? meeting.usage, result, status: 'completed' }).catch(
-      (err) => {
+    meetingsApi
+      .get(id)
+      .then(downloadMeetingDocx)
+      .catch((err) => {
         console.error('הורדת סיכום הפגישה (DOCX) נכשלה', err);
-      }
-    );
-  }, [status, result, meeting, transcript, usage]);
+      });
+  }, [status, id]);
 
   const personaById = useMemo(() => {
     const map = new Map<string, Persona>();
@@ -615,7 +639,7 @@ function MeetingRunInner({ id }: { id: string }) {
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">{meeting.title}</h1>
+          <h1 className="text-2xl font-semibold">{meeting.title || 'פגישה חדשה (הכותרת תיקבע בסיום)'}</h1>
           <p className="mt-1 text-sm text-black/60 dark:text-white/60">{meeting.objective}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -702,6 +726,46 @@ function MeetingRunInner({ id }: { id: string }) {
           </div>
         )}
       </Card>
+
+      {creatorTurnRequest && (
+        <Card className="flex flex-col gap-3 border-2 border-violet-500/40 p-5">
+          <div>
+            <h2 className="text-sm font-semibold">התור שלך — סבב {creatorTurnRequest.round} מתוך {creatorTurnRequest.totalRounds}</h2>
+            <p className="mt-1 text-xs text-black/55 dark:text-white/55">
+              המשתתפים סיימו את הסבב הזה. אפשר להוסיף מה שיש לך לומר, או לדלג.
+            </p>
+          </div>
+          <textarea
+            dir="rtl"
+            autoFocus
+            value={creatorDraft}
+            onChange={(e) => setCreatorDraft(e.target.value)}
+            style={{ minHeight: 100 }}
+            className={inputClasses}
+            placeholder="מה תרצה/י להוסיף לדיון בסבב הזה?"
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                creatorTurnRequest.resolve('');
+                setCreatorTurnRequest(null);
+              }}
+            >
+              דלג
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                creatorTurnRequest.resolve(creatorDraft);
+                setCreatorTurnRequest(null);
+              }}
+            >
+              שלח
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {status === 'completed' && result && <ResultTabs result={result} />}
 

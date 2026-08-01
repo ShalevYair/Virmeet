@@ -260,6 +260,7 @@ export type MeetingCreateInput = {
   meetingTypeIds: string[];
   objective: string;
   participantIds: string[];
+  creatorParticipates?: boolean;
   model: AvailableModel;
   files?: AttachedFile[];
   discussionRounds?: number;
@@ -289,6 +290,7 @@ export async function createMeeting(input: MeetingCreateInput): Promise<Meeting>
     meetingTypeIds: input.meetingTypeIds,
     objective: input.objective,
     participantIds: input.participantIds,
+    creatorParticipates: input.creatorParticipates ?? false,
     model: input.model,
     files: input.files ?? [],
     discussionRounds: input.discussionRounds ?? 2,

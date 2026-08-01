@@ -33,6 +33,15 @@ export interface RunMeetingDeps {
   getPersonas: () => Promise<Persona[]>;
   getMeetingTypes: () => Promise<MeetingType[]>;
   getOrgSettings: () => Promise<OrgSettings>;
+  /**
+   * Called once per discussion round, after every persona has spoken, when
+   * `meeting.creatorParticipates` is true — lets the human running the
+   * simulation add their own line to that round. Resolves with the entered
+   * text, or `''` to skip that round. Optional: only the browser UI supplies
+   * a real implementation (see api-client.ts#runMeeting); tests that don't
+   * exercise creator participation never need it.
+   */
+  requestCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string>;
 }
 
 export interface PrepOutput {
