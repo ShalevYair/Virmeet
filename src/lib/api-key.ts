@@ -35,10 +35,3 @@ export function clearStoredApiKey(): void {
     // Storage disabled/unavailable — nothing to clear.
   }
 }
-
-/** Masks a key for display, e.g. "AIzaSyC…4f2a". Never returns the full value. */
-export function maskApiKey(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length <= 8) return '••••';
-  return `${trimmed.slice(0, 7)}…${trimmed.slice(-4)}`;
-}
