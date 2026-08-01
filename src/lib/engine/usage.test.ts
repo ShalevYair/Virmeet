@@ -31,6 +31,7 @@ function validConvergence(): CallModelResult {
 function validExtraction(): CallModelResult {
   return makeCallModelResult({
     text: JSON.stringify({
+      title: 't',
       summary: 's',
       decisions: [],
       openQuestions: [],

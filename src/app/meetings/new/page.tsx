@@ -28,10 +28,10 @@ export default function NewMeetingPage() {
   const [personas, setPersonas] = useState<Persona[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [title, setTitle] = useState('');
   const [selectedTypeIds, setSelectedTypeIds] = useState<string[]>([]);
   const [objective, setObjective] = useState('');
   const [participantIds, setParticipantIds] = useState<string[]>([]);
+  const [creatorParticipates, setCreatorParticipates] = useState(false);
   const [model, setModel] = useState<AvailableModel>(DEFAULT_MODEL);
   const [discussionRounds, setDiscussionRounds] = useState(2);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
@@ -78,10 +78,9 @@ export default function NewMeetingPage() {
     setStagedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const titleValid = title.trim().length > 0;
   const typesValid = selectedTypeIds.length >= 1;
   const participantsValid = participantIds.length >= 2;
-  const formValid = titleValid && typesValid && participantsValid;
+  const formValid = typesValid && participantsValid;
 
   async function handleStart() {
     setTouched(true);
@@ -90,10 +89,10 @@ export default function NewMeetingPage() {
     setSubmitError(null);
     try {
       const meeting = await meetingsApi.create({
-        title: title.trim(),
         meetingTypeIds: selectedTypeIds,
         objective,
         participantIds,
+        creatorParticipates,
         model,
         discussionRounds,
       });
@@ -131,18 +130,6 @@ export default function NewMeetingPage() {
       </div>
 
       {submitError && <ErrorBanner message={submitError} />}
-
-      <Card className="flex flex-col gap-4 p-5">
-        <Field label="כותרת הפגישה">
-          <input
-            className={inputClasses}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="לדוגמה: סקירת ארכיטקטורה — מערכת רישוי דיגיטלי"
-          />
-          {touched && !titleValid && <p className="text-xs text-red-600 dark:text-red-400">נדרשת כותרת</p>}
-        </Field>
-      </Card>
 
       <Card className="flex flex-col gap-3 p-5">
         <div className="flex items-center justify-between">
@@ -195,6 +182,29 @@ export default function NewMeetingPage() {
         {touched && !participantsValid && (
           <p className="text-xs text-red-600 dark:text-red-400">יש לבחור לפחות שני משתתפים</p>
         )}
+        <button type="button" onClick={() => setCreatorParticipates((v) => !v)} className="text-right">
+          <Card
+            className={`flex items-center gap-3 p-3 transition-shadow hover:shadow-md ${
+              creatorParticipates ? 'ring-2 ring-blue-500' : ''
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={creatorParticipates}
+              onChange={() => setCreatorParticipates((v) => !v)}
+              className="shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">אני (יוצר הפגישה)</p>
+              <p className="text-xs text-black/55 dark:text-white/55">
+                {creatorParticipates
+                  ? 'בכל סבב דיון תתבקש/י להוסיף את מה שיש לך לומר, אחרי המשתתפים'
+                  : 'ברירת מחדל: לא משתתף/ת — רק צופה בסימולציה'}
+              </p>
+            </div>
+          </Card>
+        </button>
         {activePersonas.length === 0 ? (
           <p className="text-sm text-black/55 dark:text-white/55">
             אין משתתפים פעילים. הוסיפו משתתפים בעמוד{' '}

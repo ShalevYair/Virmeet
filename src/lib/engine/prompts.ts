@@ -105,7 +105,7 @@ function meetingTypesBlock(meetingTypes: MeetingType[]): string {
 function meetingHeaderBlock(meeting: Meeting, meetingTypes: MeetingType[]): string {
   return `# הפגישה
 
-כותרת: ${meeting.title}
+כותרת: ${meeting.title || '(כותרת תיקבע בסיום הפגישה)'}
 
 ## סוג/י הפגישה
 ${meetingTypesBlock(meetingTypes)}
@@ -267,10 +267,12 @@ ${convergenceSummary}
 
 # המשימה שלך עכשיו
 
-חלץ מהפגישה הזו את כל השדות הנדרשים בסכימה: summary, decisions, openQuestions,
-conflicts, risks, tasks, modelAssumptions.
+חלץ מהפגישה הזו את כל השדות הנדרשים בסכימה: title, summary, decisions,
+openQuestions, conflicts, risks, tasks, modelAssumptions.
 
 דגשים מחייבים:
+- title: כותרת קצרה ותמציתית (עד כ-8 מילים) שמשקפת את מה שבאמת נדון בפגישה
+  הזו בפועל — לא ניסוח גנרי של סוג הפגישה.
 - כל משימה ב-tasks חייבת לכלול assumption (ההנחה שעליה המשימה נשענת) ו-
   riskIfAssumptionWrong (מה הסיכון אם ההנחה הזו מתבררת כשגויה). אל תשאיר שדות
   אלה גנריים — התבסס על מה שבאמת נאמר או לא נאמר בדיון.
