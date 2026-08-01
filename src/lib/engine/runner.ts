@@ -6,6 +6,7 @@
 // schemas.ts for the structured-output JSON schemas.
 
 import {
+  AttachedFile,
   Meeting,
   MeetingResult,
   MeetingType,
@@ -25,7 +26,8 @@ import {
   updateMeeting as storeUpdateMeeting,
 } from '../store';
 import { CallBudget } from './budget';
-import { refreshPersonaDriveIndex } from './drive-knowledge';
+import { fetchDeepReadAttachedFile, MAX_DEEP_READ_FILES_PER_PERSONA, refreshPersonaDriveIndex } from './drive-knowledge';
+import type { RefreshResult } from './drive-knowledge';
 import * as prompts from './prompts';
 import { EXTRACTION_SCHEMA, ExtractionModelOutput, OPENING_SCHEMA, PREP_SCHEMA } from './schemas';
 import { OnEvent, OpeningOutput, PhaseName, PrepOutput, RunMeetingDeps } from './types';
@@ -43,6 +45,13 @@ const defaultDeps: RunMeetingDeps = {
       return Promise.reject(new Error('אין חיבור פעיל ל-Drive (יש להתחבר מחדש בהגדרות).'));
     }
     return refreshPersonaDriveIndex(token, folderId, realCallModel, apiKey, signal);
+  },
+  fetchDriveDeepReadFile: (fileId, fileName) => {
+    const token = getDriveAccessToken();
+    if (!token) {
+      return Promise.reject(new Error('אין חיבור פעיל ל-Drive (יש להתחבר מחדש בהגדרות).'));
+    }
+    return fetchDeepReadAttachedFile(token, fileId, fileName);
   },
 };
 
@@ -231,13 +240,18 @@ export async function runMeeting(
   // before anyone's prep call runs — sequential and synchronous with this
   // phase (not a model call, so it doesn't touch budget/usage). A failure
   // here degrades that one persona back to whatever local files it already
-  // has; it never fails the meeting.
+  // has; it never fails the meeting. Results are kept around (not just
+  // logged): the index summaries go into every one of that persona's system
+  // blocks from here on, and `fileIdsByName` lets the deep-read step below
+  // resolve names the persona names in its prep output back to Drive ids.
+  const driveIndexByPersona = new Map<string, RefreshResult>();
   if (deps.refreshDriveKnowledge) {
     for (const persona of participants) {
       if (!persona.driveFolderId) continue;
       if (await abortIfCancelled('prep')) return;
       try {
         const refresh = await deps.refreshDriveKnowledge(persona.driveFolderId, apiKey, signal);
+        driveIndexByPersona.set(persona.id, refresh);
         const truncatedNote = refresh.truncated
           ? ' (הגיע למגבלת העדכונים לריצה אחת — חלק מהקבצים לא עודכנו הפעם)'
           : '';
@@ -272,7 +286,9 @@ export async function runMeeting(
       try {
         const result = await deps.callModel({
           model: meeting.model,
-          system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
+          system: prompts.buildPersonaSystemBlocks(org, persona, meeting, {
+            indexSummary: driveIndexByPersona.get(persona.id)?.files,
+          }),
           messages: [{ role: 'user', content: prompts.buildPrepUserMessage(meeting, meetingTypes) }],
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
@@ -342,6 +358,54 @@ export async function runMeeting(
         usage: result.usage,
       })
     );
+  }
+
+  // Deep-read: fetch the full text of whatever files each persona named in
+  // its own prep output (filesToReadInDepth), resolved against that
+  // persona's Drive index from the refresh step above. Not a model call —
+  // just a download + local extraction — so it doesn't touch budget/usage.
+  // The result gets folded into that persona's system blocks for every
+  // remaining call this run (discussion onward); a per-file failure just
+  // drops that one file rather than failing the persona or the meeting.
+  const driveDeepReadByPersona = new Map<string, AttachedFile[]>();
+  if (deps.fetchDriveDeepReadFile) {
+    for (const persona of participants) {
+      const requested = prepResults.get(persona.id)?.filesToReadInDepth ?? [];
+      const fileIdsByName = driveIndexByPersona.get(persona.id)?.fileIdsByName ?? {};
+      if (requested.length === 0) continue;
+      if (await abortIfCancelled('prep')) return;
+
+      const fetched: AttachedFile[] = [];
+      for (const name of requested.slice(0, MAX_DEEP_READ_FILES_PER_PERSONA)) {
+        const fileId = fileIdsByName[name];
+        if (!fileId) continue; // model named a file not in its index (hallucinated/stale) — skip silently
+        try {
+          fetched.push(await deps.fetchDriveDeepReadFile(fileId, name));
+        } catch (err) {
+          if (!isAborted()) {
+            await emitEntry(
+              makeEntry(
+                'prep',
+                'system',
+                'מערכת',
+                `קריאה לעומק של הקובץ "${name}" עבור ${persona.name} נכשלה (${errorMessage(err)}).`
+              )
+            );
+          }
+        }
+      }
+      if (fetched.length > 0) {
+        driveDeepReadByPersona.set(persona.id, fetched);
+        await emitEntry(
+          makeEntry(
+            'prep',
+            'system',
+            'מערכת',
+            `${persona.name} קרא/ה לעומק מ-Drive: ${fetched.map((f) => f.name).join(', ')}.`
+          )
+        );
+      }
+    }
   }
 
   // -------------------------------------------------------------------
@@ -442,7 +506,10 @@ export async function runMeeting(
       try {
         const result = await deps.callModel({
           model: meeting.model,
-          system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
+          system: prompts.buildPersonaSystemBlocks(org, persona, meeting, {
+            indexSummary: driveIndexByPersona.get(persona.id)?.files,
+            deepReadFiles: driveDeepReadByPersona.get(persona.id),
+          }),
           messages: [
             {
               role: 'user',

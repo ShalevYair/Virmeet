@@ -9,10 +9,14 @@
 // meeting itself is running on (see DRIVE_INDEX_MODEL) — this is
 // housekeeping, not part of the simulated discussion.
 //
-// This stage only maintains the index; nothing reads it into a persona's
-// prompt yet (that's the next stage).
+// Also provides fetchDeepReadAttachedFile: once a persona's prep output
+// names specific indexed files it wants read in full (PrepOutput#
+// filesToReadInDepth), the runner fetches and extracts just those, using the
+// file ids this module already resolved during the refresh above — no extra
+// Drive search needed.
 
 import { downloadFileMedia, downloadFileText, findFile, listFolderFiles, upsertTextFile, type FetchFn } from '../drive';
+import { AttachedFile } from '../types';
 import { extensionOf, extractText } from '../extract';
 import type { CallModelFn } from './types';
 
@@ -26,6 +30,12 @@ export const INDEX_FILE_NAME = '_virmeet-index.md';
 // large folder burning an unbounded number of calls at meeting start.
 const MAX_FILES_TO_SUMMARIZE_PER_RUN = 20;
 
+// A deep-read file's full text gets injected into every remaining call for
+// that persona this run (prompts.ts#buildPersonaSystemBlocks) — unlike the
+// one-off summarization cost above, this cost repeats every turn, so the cap
+// is much tighter.
+export const MAX_DEEP_READ_FILES_PER_PERSONA = 3;
+
 export interface PersonaKnowledgeFile {
   name: string;
   modifiedTime: string;
@@ -34,6 +44,8 @@ export interface PersonaKnowledgeFile {
 
 export interface RefreshResult {
   files: PersonaKnowledgeFile[];
+  /** This run's Drive file id per file name — for fetchDeepReadAttachedFile. Not persisted in the index itself. */
+  fileIdsByName: Record<string, string>;
   changedCount: number;
   totalCount: number;
   truncated: boolean;
@@ -158,5 +170,29 @@ export async function refreshPersonaDriveIndex(
 
   await upsertTextFile(token, INDEX_FILE_NAME, folderId, renderIndexContent(files), 'text/markdown', fetchFn);
 
-  return { files, changedCount, totalCount: knowledgeFiles.length, truncated };
+  const fileIdsByName: Record<string, string> = {};
+  for (const file of knowledgeFiles) fileIdsByName[file.name] = file.id;
+
+  return { files, fileIdsByName, changedCount, totalCount: knowledgeFiles.length, truncated };
+}
+
+/** Downloads and extracts one file's full text, shaped as an `AttachedFile` so `prompts.ts#buildFilesBlock` can render it like any other background file. */
+export async function fetchDeepReadAttachedFile(
+  token: string,
+  fileId: string,
+  fileName: string,
+  fetchFn: FetchFn = fetch
+): Promise<AttachedFile> {
+  const buffer = await downloadFileMedia(token, fileId, fetchFn);
+  const extraction = await extractText(buffer, extensionOf(fileName));
+  return {
+    id: fileId,
+    name: fileName,
+    mimeType: 'application/octet-stream',
+    sizeBytes: buffer.byteLength,
+    storedPath: '',
+    extractedText: extraction.text,
+    extractionError: extraction.error,
+    addedAt: new Date().toISOString(),
+  };
 }

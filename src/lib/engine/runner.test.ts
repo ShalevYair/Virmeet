@@ -11,7 +11,7 @@ import {
   scriptedCallModel,
 } from './__tests__/helpers';
 import { resolveTaskOwnerName, runMeeting } from './runner';
-import type { MeetingEvent } from './types';
+import type { MeetingEvent, RunMeetingDeps } from './types';
 
 describe('resolveTaskOwnerName', () => {
   it('falls back to the project manager when the model reports no clear owner', () => {
@@ -32,9 +32,9 @@ describe('resolveTaskOwnerName', () => {
 // prep(p2), opening, discussion round1(p1), discussion round1(p2),
 // convergence, extraction — the creator's turn (when enabled) never calls
 // the model, so it isn't in this list.
-function validPrep(): CallModelResult {
+function validPrep(filesToReadInDepth: string[] = []): CallModelResult {
   return makeCallModelResult({
-    text: JSON.stringify({ understanding: 'u', concerns: ['a', 'b', 'c'], questions: ['a', 'b', 'c'] }),
+    text: JSON.stringify({ understanding: 'u', concerns: ['a', 'b', 'c'], questions: ['a', 'b', 'c'], filesToReadInDepth }),
   });
 }
 function validOpening(): CallModelResult {
@@ -60,10 +60,13 @@ function validExtraction(title = 't'): CallModelResult {
     }),
   });
 }
-function happyPathResponses(extractedTitle?: string): CallModelResult[] {
+function happyPathResponses(
+  extractedTitle?: string,
+  prepResponses: [CallModelResult, CallModelResult] = [validPrep(), validPrep()]
+): CallModelResult[] {
   return [
-    validPrep(),
-    validPrep(),
+    prepResponses[0],
+    prepResponses[1],
     validOpening(),
     validDiscussion('1'),
     validDiscussion('2'),
@@ -75,13 +78,11 @@ function happyPathResponses(extractedTitle?: string): CallModelResult[] {
 async function runHappyPath(
   meetingOverrides: Partial<Meeting> = {},
   depsOverrides: {
-    requestCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string>;
-    refreshDriveKnowledge?: (
-      folderId: string,
-      apiKey: string | undefined,
-      signal: AbortSignal | undefined
-    ) => Promise<{ changedCount: number; totalCount: number; truncated: boolean }>;
+    requestCreatorTurn?: RunMeetingDeps['requestCreatorTurn'];
+    refreshDriveKnowledge?: RunMeetingDeps['refreshDriveKnowledge'];
+    fetchDriveDeepReadFile?: RunMeetingDeps['fetchDriveDeepReadFile'];
     personaOverrides?: [Partial<Persona>?, Partial<Persona>?];
+    prepResponses?: [CallModelResult, CallModelResult];
   } = {},
   extractedTitle?: string
 ) {
@@ -101,9 +102,10 @@ async function runHappyPath(
     personas: [p1, p2],
     meetingTypes: [meetingType],
     org: makeOrg(),
-    callModel: scriptedCallModel(happyPathResponses(extractedTitle)),
+    callModel: scriptedCallModel(happyPathResponses(extractedTitle, depsOverrides.prepResponses)),
     requestCreatorTurn: depsOverrides.requestCreatorTurn,
     refreshDriveKnowledge: depsOverrides.refreshDriveKnowledge,
+    fetchDriveDeepReadFile: depsOverrides.fetchDriveDeepReadFile,
   });
 
   const events: MeetingEvent[] = [];
@@ -189,7 +191,7 @@ describe('Drive knowledge refresh before prep', () => {
         personaOverrides: [{ driveFolderId: 'folder-a' }, { driveFolderId: 'folder-b' }],
         refreshDriveKnowledge: async (folderId) => {
           calls.push(folderId);
-          return { changedCount: 2, totalCount: 3, truncated: false };
+          return { files: [], fileIdsByName: {}, changedCount: 2, totalCount: 3, truncated: false };
         },
       }
     );
@@ -211,7 +213,7 @@ describe('Drive knowledge refresh before prep', () => {
       {
         refreshDriveKnowledge: async () => {
           called = true;
-          return { changedCount: 0, totalCount: 0, truncated: false };
+          return { files: [], fileIdsByName: {}, changedCount: 0, totalCount: 0, truncated: false };
         },
       }
     );
@@ -232,5 +234,123 @@ describe('Drive knowledge refresh before prep', () => {
     expect(finalMeeting.status).toBe('completed');
     const failureLine = finalMeeting.transcript.find((e) => e.text.includes('רענון אינדקס הידע'));
     expect(failureLine?.text).toContain('אין חיבור פעיל ל-Drive');
+  });
+});
+
+describe('Drive deep-read after prep', () => {
+  function refreshWith(fileIdsByName: Record<string, string>): RunMeetingDeps['refreshDriveKnowledge'] {
+    return async () => ({ files: [], fileIdsByName, changedCount: 0, totalCount: 0, truncated: false });
+  }
+
+  it("fetches the files a persona named in filesToReadInDepth, resolved via that persona's own Drive index", async () => {
+    const fetchCalls: { fileId: string; fileName: string }[] = [];
+    const finalMeeting = await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }],
+        prepResponses: [validPrep(['a.pdf']), validPrep()],
+        refreshDriveKnowledge: refreshWith({ 'a.pdf': 'file-id-a' }),
+        fetchDriveDeepReadFile: async (fileId, fileName) => {
+          fetchCalls.push({ fileId, fileName });
+          return {
+            id: fileId,
+            name: fileName,
+            mimeType: 'application/octet-stream',
+            sizeBytes: 10,
+            storedPath: '',
+            extractedText: 'תוכן מלא',
+            addedAt: new Date().toISOString(),
+          };
+        },
+      }
+    );
+
+    expect(fetchCalls).toEqual([{ fileId: 'file-id-a', fileName: 'a.pdf' }]);
+    const line = finalMeeting.transcript.find((e) => e.text.includes('קרא/ה לעומק מ-Drive'));
+    expect(line?.text).toContain('a.pdf');
+  });
+
+  it('skips a requested file name silently when it is not in that run\'s Drive index (hallucinated/stale)', async () => {
+    let called = false;
+    const finalMeeting = await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }],
+        prepResponses: [validPrep(['does-not-exist.pdf']), validPrep()],
+        refreshDriveKnowledge: refreshWith({ 'a.pdf': 'file-id-a' }),
+        fetchDriveDeepReadFile: async () => {
+          called = true;
+          throw new Error('should not be called');
+        },
+      }
+    );
+
+    expect(called).toBe(false);
+    expect(finalMeeting.transcript.some((e) => e.text.includes('קרא/ה לעומק'))).toBe(false);
+  });
+
+  it('logs a per-file failure line and keeps going when a deep-read fetch rejects', async () => {
+    const finalMeeting = await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }],
+        prepResponses: [validPrep(['a.pdf']), validPrep()],
+        refreshDriveKnowledge: refreshWith({ 'a.pdf': 'file-id-a' }),
+        fetchDriveDeepReadFile: async () => {
+          throw new Error('ההורדה נכשלה');
+        },
+      }
+    );
+
+    expect(finalMeeting.status).toBe('completed');
+    const failureLine = finalMeeting.transcript.find((e) => e.text.includes('קריאה לעומק'));
+    expect(failureLine?.text).toContain('ההורדה נכשלה');
+  });
+
+  it('caps deep-read requests at MAX_DEEP_READ_FILES_PER_PERSONA', async () => {
+    const fetchCalls: string[] = [];
+    await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }],
+        prepResponses: [validPrep(['a.pdf', 'b.pdf', 'c.pdf', 'd.pdf']), validPrep()],
+        refreshDriveKnowledge: refreshWith({
+          'a.pdf': 'id-a',
+          'b.pdf': 'id-b',
+          'c.pdf': 'id-c',
+          'd.pdf': 'id-d',
+        }),
+        fetchDriveDeepReadFile: async (fileId, fileName) => {
+          fetchCalls.push(fileName);
+          return {
+            id: fileId,
+            name: fileName,
+            mimeType: 'application/octet-stream',
+            sizeBytes: 1,
+            storedPath: '',
+            extractedText: '',
+            addedAt: new Date().toISOString(),
+          };
+        },
+      }
+    );
+
+    expect(fetchCalls).toEqual(['a.pdf', 'b.pdf', 'c.pdf']);
+  });
+
+  it('never calls fetchDriveDeepReadFile when a persona requests nothing', async () => {
+    let called = false;
+    await runHappyPath(
+      {},
+      {
+        personaOverrides: [{ driveFolderId: 'folder-a' }],
+        refreshDriveKnowledge: refreshWith({ 'a.pdf': 'file-id-a' }),
+        fetchDriveDeepReadFile: async () => {
+          called = true;
+          throw new Error('should not be called');
+        },
+      }
+    );
+    expect(called).toBe(false);
   });
 });

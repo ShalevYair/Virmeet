@@ -26,8 +26,15 @@ export const PREP_SCHEMA = {
       minItems: 3,
       maxItems: 3,
     },
+    filesToReadInDepth: {
+      type: 'array',
+      description:
+        'שמות מדויקים (עד 3) מתוך "קבצי ידע זמינים ב-Drive" שהפרסונה מבקשת לקרוא במלואם, ולא רק את תקצירם. מערך ריק אם אין כאלה או שאין קבצי Drive זמינים.',
+      items: { type: 'string' },
+      maxItems: 3,
+    },
   },
-  required: ['understanding', 'concerns', 'questions'],
+  required: ['understanding', 'concerns', 'questions', 'filesToReadInDepth'],
   additionalProperties: false,
 } as const;
 

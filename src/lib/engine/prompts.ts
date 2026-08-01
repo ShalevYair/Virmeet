@@ -12,8 +12,9 @@
 // preserve. Do not fold per-phase or per-round content into the system
 // blocks.
 
-import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
+import { AttachedFile, Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { SystemBlock } from '../llm-types';
+import type { PersonaKnowledgeFile } from './drive-knowledge';
 import { OpeningOutput, PrepOutput } from './types';
 
 const PHASE_LABELS_HE: Record<TranscriptEntry['phase'], string> = {
@@ -71,15 +72,42 @@ function buildFilesBlock(files: Persona['files'] | Meeting['files'], heading: st
 
 const SHARED_FILES_HEADING = '# קבצי רקע משותפים לכל משתתפי הפגישה';
 const PRIVATE_FILES_HEADING = '# קבצי רקע פרטיים שלך (אף אחד אחר לא רואה אותם)';
+const DRIVE_INDEX_HEADING =
+  '# קבצי ידע זמינים ב-Drive (תקצירים בלבד)\n\nאלה תקצירים קצרים בלבד. בשלב ההכנה (prep) אפשר לבקש לקרוא את התוכן המלא של עד כמה מהם, דרך filesToReadInDepth.';
+const DRIVE_DEEP_READ_HEADING = '# קבצים מ-Drive שביקשת לקרוא לעומק בשלב ההכנה';
 
-/** [orgBlock, sharedFilesBlock, personaPrompt, personaFilesBlock] — stable for the whole meeting. */
-export function buildPersonaSystemBlocks(org: OrgSettings, persona: Persona, meeting: Meeting): SystemBlock[] {
-  return [
+/** Renders the Drive knowledge-folder index (name + summary only, no full text) — see engine/drive-knowledge.ts. */
+function buildDriveIndexBlock(files: PersonaKnowledgeFile[]): string {
+  const parts = files.map((f) => `- ${f.name}: ${f.summary}`);
+  return `${DRIVE_INDEX_HEADING}\n\n${parts.join('\n')}`;
+}
+
+/**
+ * [orgBlock, sharedFilesBlock, personaPrompt, personaFilesBlock, driveIndexBlock?, driveDeepReadBlock?].
+ * The first four are stable for the whole meeting; `driveKnowledge.indexSummary` (from the
+ * pre-prep refresh, engine/drive-knowledge.ts) is available from prep onward, but
+ * `driveKnowledge.deepReadFiles` only exists *after* prep decided what to request — so it's
+ * omitted for the prep call itself and only appended for calls from opening/discussion onward.
+ */
+export function buildPersonaSystemBlocks(
+  org: OrgSettings,
+  persona: Persona,
+  meeting: Meeting,
+  driveKnowledge: { indexSummary?: PersonaKnowledgeFile[]; deepReadFiles?: AttachedFile[] } = {}
+): SystemBlock[] {
+  const blocks: SystemBlock[] = [
     { type: 'text', text: buildOrgBlock(org) },
     { type: 'text', text: buildFilesBlock(meeting.files, SHARED_FILES_HEADING) },
     { type: 'text', text: persona.prompt },
     { type: 'text', text: buildFilesBlock(persona.files, PRIVATE_FILES_HEADING) },
   ];
+  if (driveKnowledge.indexSummary && driveKnowledge.indexSummary.length > 0) {
+    blocks.push({ type: 'text', text: buildDriveIndexBlock(driveKnowledge.indexSummary) });
+  }
+  if (driveKnowledge.deepReadFiles && driveKnowledge.deepReadFiles.length > 0) {
+    blocks.push({ type: 'text', text: buildFilesBlock(driveKnowledge.deepReadFiles, DRIVE_DEEP_READ_HEADING) });
+  }
+  return blocks;
 }
 
 const FACILITATOR_ROLE_PROMPT = `אתה המנחה (facilitator) של הפגישה. אתה לא צד בדיון ואין לך אינטרס אישי בתוצאה —
@@ -144,7 +172,10 @@ export function buildPrepUserMessage(meeting: Meeting, meetingTypes: MeetingType
 להגיע להסכמה מראש. תן:
 - understanding: תיאור קצר (2-4 משפטים) של הבנתך את מטרת הפגישה ומה על הפרק, מהזווית שלך.
 - concerns: בדיוק 3 חששות או סיכונים שהכי מטרידים אותך בהקשר הזה.
-- questions: בדיוק 3 שאלות שהיית שואל/ת בתחילת הפגישה הזו.`;
+- questions: בדיוק 3 שאלות שהיית שואל/ת בתחילת הפגישה הזו.
+- filesToReadInDepth: אם יש לך למעלה "קבצי ידע זמינים ב-Drive" ואתה צריך את התוכן
+  המלא של אחד או יותר מהם (לא רק את התקציר) כדי להכין תשובה מבוססת — ציין את
+  שמותיהם המדויקים, עד 3 קבצים. אם אין קבצים כאלה או שאין בהם צורך, מערך ריק.`;
 }
 
 // ---------------------------------------------------------------------------
