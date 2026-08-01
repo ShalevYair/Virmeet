@@ -103,6 +103,7 @@ export function makeDeps(options: {
   callModel?: CallModelFn;
   requestCreatorTurn?: RunMeetingDeps['requestCreatorTurn'];
   refreshDriveKnowledge?: RunMeetingDeps['refreshDriveKnowledge'];
+  fetchDriveDeepReadFile?: RunMeetingDeps['fetchDriveDeepReadFile'];
 }): TestDeps {
   let current = options.meeting;
   const patches: Partial<Meeting>[] = [];
@@ -140,6 +141,7 @@ export function makeDeps(options: {
     },
     requestCreatorTurn: options.requestCreatorTurn,
     refreshDriveKnowledge: options.refreshDriveKnowledge,
+    fetchDriveDeepReadFile: options.fetchDriveDeepReadFile,
   };
 }
 

@@ -2,8 +2,9 @@
 // These types describe the runner's public event contract and the pieces it
 // depends on. Kept separate from src/lib/types.ts (the persisted data model).
 
-import { Meeting, MeetingPhase, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
+import { AttachedFile, Meeting, MeetingPhase, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { CallModelOptions, CallModelResult } from '../llm-types';
+import type { PersonaKnowledgeFile } from './drive-knowledge';
 
 export type PhaseName = MeetingPhase;
 
@@ -55,13 +56,29 @@ export interface RunMeetingDeps {
     folderId: string,
     apiKey: string | undefined,
     signal: AbortSignal | undefined
-  ) => Promise<{ changedCount: number; totalCount: number; truncated: boolean }>;
+  ) => Promise<{
+    files: PersonaKnowledgeFile[];
+    fileIdsByName: Record<string, string>;
+    changedCount: number;
+    totalCount: number;
+    truncated: boolean;
+  }>;
+  /**
+   * Fetches one Drive file's full extracted text (as an `AttachedFile`) —
+   * called right after `prep`, once per file a persona named in its
+   * `filesToReadInDepth` (see PrepOutput). Throws on failure (no Drive
+   * session, download/extraction error); the runner catches per-file and
+   * just skips it. Optional: omitted disables deep-read fetching (e.g. in
+   * tests that don't exercise it).
+   */
+  fetchDriveDeepReadFile?: (fileId: string, fileName: string) => Promise<AttachedFile>;
 }
 
 export interface PrepOutput {
   understanding: string;
   concerns: string[];
   questions: string[];
+  filesToReadInDepth: string[];
 }
 
 export interface OpeningConflict {
