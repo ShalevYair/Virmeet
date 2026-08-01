@@ -5,7 +5,7 @@
 // when a meeting runs (see lib/gemini.ts) — there is no server in between.
 
 import { useEffect, useState } from 'react';
-import { clearStoredApiKey, getStoredApiKey, maskApiKey, setStoredApiKey } from '@/lib/api-key';
+import { clearStoredApiKey, getStoredApiKey, setStoredApiKey } from '@/lib/api-key';
 import { testApiKey, type TestApiKeyResult } from '@/lib/api-key-test';
 import { Button, Card, Field, Spinner, inputClasses } from '@/components/ui';
 
@@ -67,7 +67,7 @@ export function ApiKeySettings() {
         <h2 className="text-sm font-semibold">מפתח API אישי של Gemini</h2>
         <p className="mt-1 text-sm text-black/60 dark:text-white/60">
           {storedKey
-            ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש להרצת פגישות מהמכשיר הזה.`
+            ? 'יש מפתח שמור בדפדפן זה. הוא ישמש להרצת פגישות מהמכשיר הזה.'
             : 'לא שמור מפתח בדפדפן זה. יש להזין מפתח כאן כדי להריץ פגישות.'}
         </p>
       </div>
@@ -102,7 +102,7 @@ export function ApiKeySettings() {
 
       <div className="flex items-center justify-end gap-3 border-t border-black/10 pt-4 dark:border-white/10">
         {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">נשמר ✓</span>}
-        {cleared && <span className="text-sm text-black/50 dark:text-white/50">המפתח נמחק</span>}
+        {cleared && <span className="text-sm text-black/50 dark:text-white/50">המפתח נשכח</span>}
         {testResult && (
           <span
             className={`text-sm ${
@@ -123,7 +123,7 @@ export function ApiKeySettings() {
           )}
         </Button>
         <Button variant="danger" onClick={handleClear} disabled={!storedKey}>
-          מחק מפתח
+          שכח מפתח
         </Button>
         <Button variant="primary" onClick={handleSave} disabled={!trimmedDraft}>
           שמור

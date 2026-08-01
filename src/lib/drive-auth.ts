@@ -8,6 +8,16 @@ import { clearDriveAccessToken, getDriveAccessToken, setDriveAccessToken } from 
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 
+/**
+ * The app's own OAuth Client ID — a public identifier, not a per-user
+ * secret (unlike the Gemini API key). Baked in at build time via
+ * NEXT_PUBLIC_DRIVE_CLIENT_ID (see .env.local for local dev, and
+ * .github/workflows/deploy-pages.yml for the deployed site), so every
+ * visitor just clicks "connect" and authorizes with their own Google
+ * account — nobody pastes a Client ID into the app itself.
+ */
+export const DRIVE_CLIENT_ID = process.env.NEXT_PUBLIC_DRIVE_CLIENT_ID || '';
+
 interface TokenResponse {
   access_token?: string;
   expires_in?: number;

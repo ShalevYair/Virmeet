@@ -107,21 +107,52 @@ Pro (הכי חזק), Gemini Flash (מאוזן, ברירת מחדל), Gemini Flas
 ## חיבור ל-Google Drive — ידע לפרסונות (אופציונלי)
 
 במסך ההגדרות (`/settings/`) אפשר לחבר תיקיית Google Drive שממנה כל פרסונה
-שואבת קבצי רקע פרטיים משלה, בנוסף לקבצים שמעלים ידנית. אותו מודל אמון כמו
-מפתח ה-Gemini — OAuth כולו בדפדפן (Google Identity Services), בלי שרת:
+שואבת קבצי רקע פרטיים משלה, בנוסף לקבצים שמעלים ידנית. OAuth כולו בדפדפן
+(Google Identity Services), בלי שרת.
 
-- **Client ID** (לא סוד — מזהה ציבורי) נוצר ב-Google Cloud Console ונשמר
-  ב-`localStorage`, בדיוק כמו מפתח ה-Gemini.
-- **אסימון הגישה עצמו נשמר בזיכרון בלבד** (לא ב-`localStorage`) — קצר-טווח
+**בניגוד למפתח ה-Gemini, ה-Client ID הוא לא סוד אישי של המשתמש** — הוא מזהה
+את **האתר עצמו**, ומוגדר פעם אחת על ידי מריץ האתר (ולא דרך הממשק). כתוצאה
+מזה, מסך ההגדרות מציג רק כפתור אחד — **"התחבר ל-Drive"** — שמריץ את חלון
+ה-OAuth של גוגל (אישור עם חשבון Google של המשתמש) **ומקים את מבנה
+התיקיות אוטומטית** מיד אחרי החיבור, בלי שלב נוסף. אם ה-Client ID לא הוגדר
+באתר, הכפתור נעלם ומוצגת הודעה על כך במקומו.
+
+- **אסימון הגישה נשמר בזיכרון הדפדפן בלבד** (לא ב-`localStorage`) — קצר-טווח
   (כשעה), נעלם בסגירת/רענון הלשונית, ודורש התחברות מחדש בכל פעם.
-- הכפתור "צור/רענן מבנה תיקיות" יוצר `VIRMEET/<שם הפרסונה>/` לכל פרסונה
-  פעילה — לתוך התיקיות האלה גוררים ידנית קבצי רקע דרך Drive עצמו.
 - ה-scope המבוקש הוא **גישה מלאה ל-Drive** (`.../auth/drive`), לא ה-scope
   המצומצם `drive.file` — כי המנגנון צריך לראות קבצים שנוספו ידנית דרך
   Drive, לא רק קבצים שהאתר עצמו יצר. המשמעות: מסך ה-consent ב-Google Cloud
-  יכול להישאר במצב "Testing" הבלתי-מאומת (מתאים לכלי אישי, ראו "מודל האמון"
-  למעלה) — אין צורך בתהליך אימות/בדיקת אבטחה מול Google כל עוד זה שימוש
-  אישי.
+  יכול להישאר במצב "Testing" הבלתי-מאומת — אין צורך בתהליך אימות/בדיקת
+  אבטחה מול Google כל עוד זה שימוש אישי/למשתמשים מוגדרים מראש (עד 100 test
+  users).
+
+### הגדרת ה-Client ID (למריץ האתר בלבד)
+
+צריך OAuth Client ID **אחד** לכל האתר (לא לכל משתמש). ליצירתו:
+
+1. נכנסים ל-[Google Cloud Console](https://console.cloud.google.com/) ויוצרים
+   פרויקט חדש (או בוחרים קיים).
+2. **APIs & Services → Library** → מחפשים "Google Drive API" → **Enable**.
+3. **APIs & Services → OAuth consent screen** → סוג "External" → ממלאים שם
+   אפליקציה ואימייל תמיכה → נשארים במצב "Testing" ומוסיפים את עצמכם (ואת מי
+   שעוד ישתמש) כ-"Test users". אין צורך בתהליך אימות מול גוגל לשימוש אישי.
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
+   → סוג "Web application" → תחת "Authorized JavaScript origins" מוסיפים:
+   - `http://localhost:3000` (לפיתוח מקומי)
+   - `https://shalevyair.github.io` (לאתר הפרוס — **בלי** `/Virmeet` בסוף,
+     רק המקור/origin)
+5. יוצרים, ומעתיקים את ה-Client ID שנוצר (נראה כמו
+   `xxxxxxxxxxxx-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy.apps.googleusercontent.com`).
+
+איפה שמים את הערך:
+
+- **פיתוח מקומי:** בקובץ `.env.local` בשורש הריפו (נוצר אוטומטית עם placeholder
+  ריק, לא נכנס ל-git) — `NEXT_PUBLIC_DRIVE_CLIENT_ID=<הערך שהעתקתם>`.
+- **האתר הפרוס (GitHub Pages):** ב-GitHub, **Settings → Secrets and
+  variables → Actions → Variables → New repository variable**, שם
+  `NEXT_PUBLIC_DRIVE_CLIENT_ID`, ערך — אותו Client ID. לא Secret (זה לא
+  סודי) — Variable רגיל. ה-workflow (`deploy-pages.yml`) כבר מוגדר לקרוא
+  אותו אוטומטית בבנייה הבאה.
 - **בתחילת כל פגישה**, לכל משתתף עם תיקיית Drive מחוברת, המנוע מרענן את
   אינדקס הידע שלו: סורק את התיקייה, ומשווה כל קובץ מול קובץ אינדקס
   (`_virmeet-index.md`) שנשמר בתוך אותה תיקייה ב-Drive — שם וזמן עדכון לכל
