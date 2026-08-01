@@ -1,20 +1,24 @@
 // Virmeet — data model (spec §0-1). Do not change model IDs or add date suffixes.
 
-export const MODELS = {
-  persona: 'claude-sonnet-5', // ברירת מחדל לפרסונה
-  facilitator: 'claude-opus-5', // מנחה + חילוץ משימות
-} as const;
-
-export const AVAILABLE_MODELS = ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'] as const;
+// Google's three Gemini tiers, chosen once per meeting (not per persona) and
+// used for every call in that meeting — facilitator and personas alike.
+export const AVAILABLE_MODELS = ['gemini-3.1-pro-preview', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'] as const;
 
 export type AvailableModel = (typeof AVAILABLE_MODELS)[number];
+
+export const DEFAULT_MODEL: AvailableModel = 'gemini-3.6-flash';
+
+/** True iff `model` is one of the ids this app actually knows how to route (see AVAILABLE_MODELS). */
+export function isKnownModel(model: string): boolean {
+  return (AVAILABLE_MODELS as readonly string[]).includes(model);
+}
 
 export interface AttachedFile {
   id: string;
   name: string;
   mimeType: string;
   sizeBytes: number;
-  storedPath: string; // יחסי ל-data/
+  storedPath: string; // ריק ('') להעלאות דרך הדפדפן (store.ts) — משמעותי רק לקבצי seed (public/seed/files/, ראו seed-loader.ts), משריד לגרסה עם אחסון בדיסק (data/)
   extractedText: string; // '' אם החילוץ נכשל
   extractionError?: string;
   addedAt: string; // ISO
@@ -27,7 +31,6 @@ export interface Persona {
   organization: string; // "אגף טכנולוגיות, משרד התחבורה"
   color: string; // hex, לצבע האווטאר
   prompt: string; // הפרומט המלא בעברית — ניתן לעריכה מלאה
-  model: string; // ברירת מחדל 'claude-sonnet-5'
   webAccess: boolean; // האם יכולה לחפש ברשת תוך כדי הפגישה
   maxApiCalls: number; // תקציב קריאות מודל לפגישה אחת (1-20)
   maxWebSearches: number; // max_uses לכלי החיפוש (0-10)
@@ -47,6 +50,11 @@ export interface MeetingType {
   createdAt: string;
   updatedAt: string;
 }
+
+// When the model can't tie a task to a specific participant, the engine
+// (runner.ts) assigns it to the project manager instead of leaving it
+// ownerless — see public/seed/personas/project-manager.json.
+export const UNASSIGNED_TASK_OWNER_FALLBACK = 'מנהל פרויקט';
 
 export type MeetingPhase = 'prep' | 'opening' | 'discussion' | 'convergence' | 'extraction';
 export type MeetingStatus = 'draft' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -68,7 +76,7 @@ export interface MeetingTask {
   title: string;
   description: string;
   ownerPersonaId: string | null;
-  ownerName: string; // "לא שויך" אם null
+  ownerName: string; // "מנהל פרויקט" כברירת מחדל כשלא היה בעלים ברור מהדיון
   priority: 'high' | 'medium' | 'low';
   dependsOn: string[]; // כותרות/מזהים של משימות אחרות
   assumption: string; // ההנחה שעליה המשימה נשענת
@@ -87,17 +95,19 @@ export interface MeetingResult {
 
 export interface Meeting {
   id: string;
-  title: string;
+  title: string; // ריק עד שהפגישה מסתיימת — המנחה קובע כותרת בשלב extraction
   meetingTypeIds: string[]; // לפחות אחד
   objective: string; // טקסט חופשי: מה רוצים להשיג / מה בונים
   participantIds: string[]; // לפחות 2
+  creatorParticipates: boolean; // האם יוצר הפגישה (המשתמש) משתתף בעצמו בכל סבב דיון
+  model: AvailableModel; // המודל שישמש את כל המשתתפים והמנחה בפגישה זו
   files: AttachedFile[]; // קבצי רקע משותפים
   discussionRounds: number; // 1-4, ברירת מחדל 2
   status: MeetingStatus;
   transcript: TranscriptEntry[];
   result: MeetingResult | null;
   error: string | null;
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; apiCalls: number };
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; apiCalls: number };
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

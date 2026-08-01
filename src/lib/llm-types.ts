@@ -1,0 +1,52 @@
+// Virmeet — shapes for the model-call abstraction implemented by gemini.ts.
+// Kept as a separate module (rather than folded into gemini.ts) so engine
+// code (runner.ts, prompts.ts) doesn't need to import the provider directly.
+
+export interface SystemBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface CallModelMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface WebSearchOptions {
+  maxUses: number;
+}
+
+export interface CallModelOptions {
+  model: string;
+  system: SystemBlock[];
+  messages: CallModelMessage[];
+  maxTokens: number;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  webSearch?: WebSearchOptions;
+  /** JSON schema for structured output. Must set additionalProperties:false and required on every field. */
+  jsonSchema?: Record<string, unknown>;
+  /** The browser's personal Gemini key for this call. Never logged or persisted. */
+  apiKey?: string;
+  /** Aborts the in-flight provider request and any pending retry backoff. */
+  signal?: AbortSignal;
+}
+
+export interface CallModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+export interface WebSearchQuery {
+  query: string;
+}
+
+export interface CallModelResult {
+  text: string;
+  webSearches: WebSearchQuery[];
+  usage: CallModelUsage;
+  refused: boolean;
+  /** True iff the response was cut off by the max_tokens limit — `text` is a partial response, not a complete one. Always false when `refused` is true. */
+  truncated: boolean;
+}

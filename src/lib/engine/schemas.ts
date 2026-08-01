@@ -1,8 +1,8 @@
 // Virmeet — JSON schemas for structured model output (spec §0, §4).
-// Every schema here is passed verbatim as `output_config.format.schema` to
-// callModel(). Anthropic's structured-output mode requires
-// `additionalProperties: false` and every property listed in `required` —
-// both are enforced on every object below, including nested ones.
+// Every schema here is passed verbatim as `responseJsonSchema` to callModel().
+// Gemini's structured-output mode requires `additionalProperties: false` and
+// every property listed in `required` — both are enforced on every object
+// below, including nested ones.
 
 /** Phase 0 (`prep`) — one persona's private read of the meeting, unseen by peers. */
 export const PREP_SCHEMA = {
@@ -72,6 +72,11 @@ export const OPENING_SCHEMA = {
 export const EXTRACTION_SCHEMA = {
   type: 'object',
   properties: {
+    title: {
+      type: 'string',
+      description:
+        'כותרת קצרה ותמציתית (עד כ-8 מילים) שמשקפת את מה שבאמת נדון בפגישה בפועל — לא את סוג הפגישה או נוסח גנרי.',
+    },
     summary: { type: 'string', description: 'סיכום קצר של הפגישה כולה.' },
     decisions: {
       type: 'array',
@@ -155,12 +160,13 @@ export const EXTRACTION_SCHEMA = {
       items: { type: 'string' },
     },
   },
-  required: ['summary', 'decisions', 'openQuestions', 'conflicts', 'risks', 'tasks', 'modelAssumptions'],
+  required: ['title', 'summary', 'decisions', 'openQuestions', 'conflicts', 'risks', 'tasks', 'modelAssumptions'],
   additionalProperties: false,
 } as const;
 
 /** Shape produced by the model for extraction, before the runner assigns task ids and owner persona ids. */
 export interface ExtractionModelOutput {
+  title: string;
   summary: string;
   decisions: string[];
   openQuestions: { question: string; whoShouldAnswer: string; blocking: boolean }[];

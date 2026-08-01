@@ -3,7 +3,7 @@
 // depends on. Kept separate from src/lib/types.ts (the persisted data model).
 
 import { Meeting, MeetingPhase, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
-import { CallModelOptions, CallModelResult } from '../anthropic';
+import { CallModelOptions, CallModelResult } from '../llm-types';
 
 export type PhaseName = MeetingPhase;
 
@@ -12,14 +12,15 @@ export type MeetingEvent =
   | { type: 'phase'; phase: PhaseName }
   | { type: 'entry'; entry: TranscriptEntry }
   | { type: 'done'; result: MeetingResult }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'cancelled' };
 
 export type OnEvent = (event: MeetingEvent) => void;
 
 /**
  * The one seam the engine calls through to reach the model. Production code
- * passes the real `callModel` from src/lib/anthropic.ts; tests inject a stub
- * so runMeeting() never has to hit the live API to be exercised.
+ * passes the real `callModel` from src/lib/gemini.ts; tests inject a stub so
+ * runMeeting() never has to hit a live API to be exercised.
  */
 export type CallModelFn = (opts: CallModelOptions) => Promise<CallModelResult>;
 
@@ -32,6 +33,15 @@ export interface RunMeetingDeps {
   getPersonas: () => Promise<Persona[]>;
   getMeetingTypes: () => Promise<MeetingType[]>;
   getOrgSettings: () => Promise<OrgSettings>;
+  /**
+   * Called once per discussion round, after every persona has spoken, when
+   * `meeting.creatorParticipates` is true — lets the human running the
+   * simulation add their own line to that round. Resolves with the entered
+   * text, or `''` to skip that round. Optional: only the browser UI supplies
+   * a real implementation (see api-client.ts#runMeeting); tests that don't
+   * exercise creator participation never need it.
+   */
+  requestCreatorTurn?: (info: { round: number; totalRounds: number }) => Promise<string>;
 }
 
 export interface PrepOutput {

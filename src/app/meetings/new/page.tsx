@@ -1,12 +1,19 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, healthApi, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
-import type { MeetingType, Persona } from '@/lib/types';
+import { ApiError, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
+import { AVAILABLE_MODELS, DEFAULT_MODEL, type AvailableModel, type MeetingType, type Persona } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 import { getStoredApiKey } from '@/lib/api-key';
+
+const MODEL_LABELS: Record<AvailableModel, { title: string; hint: string }> = {
+  'gemini-3.1-pro-preview': { title: 'Gemini Pro', hint: 'הכי חזק — לדיונים מורכבים שדורשים איכות מקסימלית' },
+  'gemini-3.6-flash': { title: 'Gemini Flash', hint: 'מאוזן — מהירות וזמן תגובה מול איכות (ברירת מחדל)' },
+  'gemini-3.5-flash-lite': { title: 'Gemini Flash-Lite', hint: 'הכי מהיר וזול — לפגישות עם הרבה משתתפים/סבבים' },
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} בייט`;
@@ -21,10 +28,11 @@ export default function NewMeetingPage() {
   const [personas, setPersonas] = useState<Persona[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [title, setTitle] = useState('');
   const [selectedTypeIds, setSelectedTypeIds] = useState<string[]>([]);
   const [objective, setObjective] = useState('');
   const [participantIds, setParticipantIds] = useState<string[]>([]);
+  const [creatorParticipates, setCreatorParticipates] = useState(false);
+  const [model, setModel] = useState<AvailableModel>(DEFAULT_MODEL);
   const [discussionRounds, setDiscussionRounds] = useState(2);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -33,8 +41,7 @@ export default function NewMeetingPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
 
-  const [hasBrowserKey, setHasBrowserKey] = useState(true);
-  const [serverKeyConfigured, setServerKeyConfigured] = useState(true);
+  const [hasGeminiKey, setHasGeminiKey] = useState(true);
 
   function load() {
     setLoadError(null);
@@ -49,14 +56,8 @@ export default function NewMeetingPage() {
   useEffect(load, []);
 
   useEffect(() => {
-    setHasBrowserKey(Boolean(getStoredApiKey()));
-    healthApi
-      .get()
-      .then((res) => setServerKeyConfigured(res.serverKeyConfigured))
-      .catch(() => setServerKeyConfigured(true)); // fail open — don't nag if the health check itself fails
+    setHasGeminiKey(Boolean(getStoredApiKey()));
   }, []);
-
-  const missingApiKey = !serverKeyConfigured && !hasBrowserKey;
 
   const activePersonas = useMemo(() => (personas ?? []).filter((p) => p.isActive), [personas]);
 
@@ -77,10 +78,9 @@ export default function NewMeetingPage() {
     setStagedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const titleValid = title.trim().length > 0;
   const typesValid = selectedTypeIds.length >= 1;
   const participantsValid = participantIds.length >= 2;
-  const formValid = titleValid && typesValid && participantsValid;
+  const formValid = typesValid && participantsValid;
 
   async function handleStart() {
     setTouched(true);
@@ -89,16 +89,17 @@ export default function NewMeetingPage() {
     setSubmitError(null);
     try {
       const meeting = await meetingsApi.create({
-        title: title.trim(),
         meetingTypeIds: selectedTypeIds,
         objective,
         participantIds,
+        creatorParticipates,
+        model,
         discussionRounds,
       });
       for (const file of stagedFiles) {
         await meetingsApi.uploadFile(meeting.id, file);
       }
-      router.push(`/meetings/${meeting.id}`);
+      router.push(`/meetings/view/?id=${meeting.id}`);
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message : 'יצירת הפגישה נכשלה');
       setSubmitting(false);
@@ -129,18 +130,6 @@ export default function NewMeetingPage() {
       </div>
 
       {submitError && <ErrorBanner message={submitError} />}
-
-      <Card className="flex flex-col gap-4 p-5">
-        <Field label="כותרת הפגישה">
-          <input
-            className={inputClasses}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="לדוגמה: סקירת ארכיטקטורה — מערכת רישוי דיגיטלי"
-          />
-          {touched && !titleValid && <p className="text-xs text-red-600 dark:text-red-400">נדרשת כותרת</p>}
-        </Field>
-      </Card>
 
       <Card className="flex flex-col gap-3 p-5">
         <div className="flex items-center justify-between">
@@ -193,12 +182,35 @@ export default function NewMeetingPage() {
         {touched && !participantsValid && (
           <p className="text-xs text-red-600 dark:text-red-400">יש לבחור לפחות שני משתתפים</p>
         )}
+        <button type="button" onClick={() => setCreatorParticipates((v) => !v)} className="text-right">
+          <Card
+            className={`flex items-center gap-3 p-3 transition-shadow hover:shadow-md ${
+              creatorParticipates ? 'ring-2 ring-blue-500' : ''
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={creatorParticipates}
+              onChange={() => setCreatorParticipates((v) => !v)}
+              className="shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">אני (יוצר הפגישה)</p>
+              <p className="text-xs text-black/55 dark:text-white/55">
+                {creatorParticipates
+                  ? 'בכל סבב דיון תתבקש/י להוסיף את מה שיש לך לומר, אחרי המשתתפים'
+                  : 'ברירת מחדל: לא משתתף/ת — רק צופה בסימולציה'}
+              </p>
+            </div>
+          </Card>
+        </button>
         {activePersonas.length === 0 ? (
           <p className="text-sm text-black/55 dark:text-white/55">
             אין משתתפים פעילים. הוסיפו משתתפים בעמוד{' '}
-            <a href="/personas" className="text-blue-600 hover:underline dark:text-blue-400">
+            <Link href="/personas/" className="text-blue-600 hover:underline dark:text-blue-400">
               משתתפים
-            </a>
+            </Link>
             .
           </p>
         ) : (
@@ -293,6 +305,34 @@ export default function NewMeetingPage() {
       </Card>
 
       <Card className="flex flex-col gap-3 p-5">
+        <h2 className="text-sm font-semibold">מודל</h2>
+        <p className="text-xs text-black/50 dark:text-white/50">
+          המודל שישמש את כל המשתתפים והמנחה בפגישה הזו.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {AVAILABLE_MODELS.map((m) => {
+            const selected = model === m;
+            const label = MODEL_LABELS[m];
+            return (
+              <button key={m} type="button" onClick={() => setModel(m)} className="text-right">
+                <Card
+                  className={`flex h-full flex-col gap-1 p-4 transition-shadow hover:shadow-md ${
+                    selected ? 'ring-2 ring-blue-500' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">{label.title}</p>
+                    {selected && <Badge tone="info">נבחר</Badge>}
+                  </div>
+                  <p className="text-sm text-black/60 dark:text-white/60">{label.hint}</p>
+                </Card>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-5">
         <h2 className="text-sm font-semibold">מספר סבבי דיון</h2>
         <div className="flex gap-2">
           {[1, 2, 3, 4].map((n) => (
@@ -312,18 +352,16 @@ export default function NewMeetingPage() {
         </div>
       </Card>
 
-      {missingApiKey && (
+      {!hasGeminiKey && (
         <ErrorBanner
-          message={
-            'לא נמצא מפתח API של Anthropic — לא בשרת ולא בדפדפן הזה. הריצה תיכשל. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה.'
-          }
+          message="לא נמצא מפתח API של Gemini בדפדפן הזה. הריצה תיכשל. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה."
         />
       )}
-      {missingApiKey && (
+      {!hasGeminiKey && (
         <p className="-mt-4 text-sm">
-          <a href="/settings" className="text-blue-600 hover:underline dark:text-blue-400">
+          <Link href="/settings/" className="text-blue-600 hover:underline dark:text-blue-400">
             מעבר להגדרות כדי להזין מפתח API
-          </a>
+          </Link>
         </p>
       )}
 

@@ -1,144 +1,73 @@
-// Virmeet — storage layer (spec §2).
-// JSON-on-disk store under data/. Atomic writes, per-file write locks, lazy
-// seed initialization, and path-traversal-safe uploads.
+// Virmeet — storage layer, browser-only via IndexedDB (spec §5.1).
+// Same function signatures as the old fs-backed store, so the meeting engine
+// (engine/runner.ts) and every page needs no changes beyond this file.
+// Every function here is browser-only — it throws if called during the
+// build's server-side prerender (no `indexedDB` global there); pages only
+// call these from useEffect/event handlers, which never run during prerender.
 
-import { randomUUID } from 'crypto';
-import fs from 'fs/promises';
-import path from 'path';
-import {
-  AttachedFile,
-  Meeting,
-  MeetingStatus,
-  MeetingType,
-  OrgSettings,
-  Persona,
-} from './types';
-import { extractText } from './extract';
-import { seedOrgSettings, seedPersonas, seedMeetingTypes } from './seed';
+import { openDB, type IDBPDatabase } from 'idb';
+import { AttachedFile, AvailableModel, Meeting, MeetingStatus, MeetingType, OrgSettings, Persona } from './types';
+import { extensionOf, extractText } from './extract';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
-const MEETINGS_DIR = path.join(DATA_DIR, 'meetings');
-const PERSONAS_FILE = path.join(DATA_DIR, 'personas.json');
-const MEETING_TYPES_FILE = path.join(DATA_DIR, 'meeting-types.json');
-const ORG_FILE = path.join(DATA_DIR, 'org.json');
+const DB_NAME = 'virmeet';
+const DB_VERSION = 1;
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED_EXTENSIONS = ['.txt', '.md', '.csv', '.json', '.pdf', '.docx'];
 
-// ---------------------------------------------------------------------------
-// Per-file write lock — serializes writes to the same path so a meeting run
-// (which writes after every phase) never races the JSON file with a
-// concurrent write from the UI's polling / another request.
-// ---------------------------------------------------------------------------
+const BLANK_ORG_SETTINGS: OrgSettings = {
+  organizationName: '',
+  description: '',
+  constraints: '',
+  updatedAt: new Date(0).toISOString(),
+};
 
-const writeLocks = new Map<string, Promise<void>>();
+interface KvRow {
+  key: string;
+  value: unknown;
+}
 
-async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-  const key = path.resolve(filePath);
-  const previous = writeLocks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  writeLocks.set(
-    key,
-    previous.then(() => current)
-  );
-  await previous;
-  try {
-    return await fn();
-  } finally {
-    release();
-    // Clean up the map entry if nothing chained after us, to avoid unbounded growth.
-    if (writeLocks.get(key) === current) {
-      writeLocks.delete(key);
-    }
+let dbPromise: Promise<IDBPDatabase> | null = null;
+
+function getDb(): Promise<IDBPDatabase> {
+  if (typeof indexedDB === 'undefined') {
+    return Promise.reject(new Error('IndexedDB אינו זמין בסביבה הזו (ריצה בצד השרת?).'));
   }
-}
-
-// ---------------------------------------------------------------------------
-// Atomic JSON read/write helpers
-// ---------------------------------------------------------------------------
-
-async function ensureDir(dir: string): Promise<void> {
-  await fs.mkdir(dir, { recursive: true });
-}
-
-async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
-  await ensureDir(path.dirname(filePath));
-  const tmpPath = `${filePath}.tmp`;
-  const json = JSON.stringify(data, null, 2);
-  await fs.writeFile(tmpPath, json, 'utf-8');
-  await fs.rename(tmpPath, filePath);
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
+  if (!dbPromise) {
+    dbPromise = openDB(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('personas')) db.createObjectStore('personas', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meetingTypes')) db.createObjectStore('meetingTypes', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meetings')) db.createObjectStore('meetings', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'key' });
+      },
+    });
   }
-}
-
-/** Read a JSON file, lazily seeding it from `seedFactory` if it doesn't exist yet. */
-async function readJsonWithSeed<T>(filePath: string, seedFactory: () => T): Promise<T> {
-  return withFileLock(filePath, async () => {
-    if (!(await fileExists(filePath))) {
-      const seed = seedFactory();
-      await writeJsonAtomic(filePath, seed);
-      return seed;
-    }
-    const raw = await fs.readFile(filePath, 'utf-8');
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      // Corrupt file (e.g. crash mid-write before atomic rename existed) — reseed.
-      const seed = seedFactory();
-      await writeJsonAtomic(filePath, seed);
-      return seed;
-    }
-  });
-}
-
-async function writeJsonLocked(filePath: string, data: unknown): Promise<void> {
-  return withFileLock(filePath, () => writeJsonAtomic(filePath, data));
-}
-
-/**
- * Read-modify-write a JSON file as a single atomic transaction under the
- * file's write lock. This is the piece that makes create/update/delete safe
- * under concurrency: listPersonas() + writeJsonLocked() as two *separate*
- * lock acquisitions would let two concurrent createPersona() calls both read
- * the same "before" array and clobber each other's write. Holding the lock
- * across the whole read -> mutate -> write sequence closes that gap.
- */
-async function transact<T, R>(
-  filePath: string,
-  seedFactory: () => T,
-  mutator: (current: T) => { next: T; result: R }
-): Promise<R> {
-  return withFileLock(filePath, async () => {
-    let current: T;
-    if (!(await fileExists(filePath))) {
-      current = seedFactory();
-    } else {
-      const raw = await fs.readFile(filePath, 'utf-8');
-      try {
-        current = JSON.parse(raw) as T;
-      } catch {
-        current = seedFactory();
-      }
-    }
-    const { next, result } = mutator(current);
-    await writeJsonAtomic(filePath, next);
-    return result;
-  });
+  return dbPromise;
 }
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function newId(): string {
+  return crypto.randomUUID();
+}
+
+// ---------------------------------------------------------------------------
+// kv — small generic key/value store, used for org settings + seed version
+// (see seed-loader.ts). Exposed for seed-loader; not meant for other callers.
+// ---------------------------------------------------------------------------
+
+export async function getKv<T>(key: string): Promise<T | undefined> {
+  const db = await getDb();
+  const row = (await db.get('kv', key)) as KvRow | undefined;
+  return row?.value as T | undefined;
+}
+
+export async function setKv(key: string, value: unknown): Promise<void> {
+  const db = await getDb();
+  await db.put('kv', { key, value });
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +80,6 @@ export type PersonaInput = {
   organization: string;
   color: string;
   prompt: string;
-  model: string;
   webAccess: boolean;
   maxApiCalls: number;
   maxWebSearches: number;
@@ -159,81 +87,75 @@ export type PersonaInput = {
 };
 
 export async function listPersonas(): Promise<Persona[]> {
-  return readJsonWithSeed<Persona[]>(PERSONAS_FILE, seedPersonas);
+  const db = await getDb();
+  return db.getAll('personas');
 }
 
 export async function getPersona(id: string): Promise<Persona | null> {
-  const personas = await listPersonas();
-  return personas.find((p) => p.id === id) ?? null;
+  const db = await getDb();
+  return (await db.get('personas', id)) ?? null;
 }
 
 export async function createPersona(input: PersonaInput): Promise<Persona> {
-  return transact(PERSONAS_FILE, seedPersonas, (personas) => {
-    const now = nowIso();
-    const persona: Persona = {
-      id: randomUUID(),
-      name: input.name,
-      role: input.role,
-      organization: input.organization,
-      color: input.color,
-      prompt: input.prompt,
-      model: input.model,
-      webAccess: input.webAccess,
-      maxApiCalls: input.maxApiCalls,
-      maxWebSearches: input.maxWebSearches,
-      files: [],
-      isActive: input.isActive ?? true,
-      createdAt: now,
-      updatedAt: now,
-    };
-    return { next: [...personas, persona], result: persona };
-  });
+  const db = await getDb();
+  const now = nowIso();
+  const persona: Persona = {
+    id: newId(),
+    name: input.name,
+    role: input.role,
+    organization: input.organization,
+    color: input.color,
+    prompt: input.prompt,
+    webAccess: input.webAccess,
+    maxApiCalls: input.maxApiCalls,
+    maxWebSearches: input.maxWebSearches,
+    files: [],
+    isActive: input.isActive ?? true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.put('personas', persona);
+  return persona;
 }
 
-export async function updatePersona(
-  id: string,
-  patch: Partial<PersonaInput>
-): Promise<Persona | null> {
-  return transact(PERSONAS_FILE, seedPersonas, (personas) => {
-    const idx = personas.findIndex((p) => p.id === id);
-    if (idx === -1) return { next: personas, result: null };
-    const updated: Persona = {
-      ...personas[idx],
-      ...patch,
-      id: personas[idx].id,
-      files: personas[idx].files,
-      createdAt: personas[idx].createdAt,
-      updatedAt: nowIso(),
-    };
-    const next = [...personas];
-    next[idx] = updated;
-    return { next, result: updated };
-  });
+export async function updatePersona(id: string, patch: Partial<PersonaInput>): Promise<Persona | null> {
+  const db = await getDb();
+  const current: Persona | undefined = await db.get('personas', id);
+  if (!current) return null;
+  const updated: Persona = {
+    ...current,
+    ...patch,
+    id: current.id,
+    files: current.files,
+    createdAt: current.createdAt,
+    updatedAt: nowIso(),
+  };
+  await db.put('personas', updated);
+  return updated;
 }
 
 export async function deletePersona(id: string): Promise<boolean> {
-  const removed = await transact(PERSONAS_FILE, seedPersonas, (personas) => {
-    const idx = personas.findIndex((p) => p.id === id);
-    if (idx === -1) return { next: personas, result: false };
-    const next = personas.filter((p) => p.id !== id);
-    return { next, result: true };
-  });
-  if (removed) {
-    // Best-effort cleanup of the persona's upload directory.
-    await fs.rm(path.join(UPLOADS_DIR, id), { recursive: true, force: true });
-  }
-  return removed;
+  const db = await getDb();
+  const existing = await db.get('personas', id);
+  if (!existing) return false;
+  await db.delete('personas', id);
+  return true;
 }
 
-/** Persist an updated files[] array on a persona (used by upload/delete file routes). */
+/** Persist an updated files[] array on a persona (used by upload/delete file flows). */
 export async function setPersonaFiles(id: string, files: AttachedFile[]): Promise<Persona | null> {
-  return transact(PERSONAS_FILE, seedPersonas, (personas) => {
-    const idx = personas.findIndex((p) => p.id === id);
-    if (idx === -1) return { next: personas, result: null };
-    const next = [...personas];
-    next[idx] = { ...next[idx], files, updatedAt: nowIso() };
-    return { next, result: next[idx] };
-  });
+  const db = await getDb();
+  const current: Persona | undefined = await db.get('personas', id);
+  if (!current) return null;
+  const updated: Persona = { ...current, files, updatedAt: nowIso() };
+  await db.put('personas', updated);
+  return updated;
+}
+
+/** Writes a persona verbatim (used only by seed-loader.ts, which supplies its own stable id). */
+export async function putPersonaRaw(persona: Persona): Promise<void> {
+  const db = await getDb();
+  await db.put('personas', persona);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,180 +169,161 @@ export type MeetingTypeInput = {
 };
 
 export async function listMeetingTypes(): Promise<MeetingType[]> {
-  return readJsonWithSeed<MeetingType[]>(MEETING_TYPES_FILE, seedMeetingTypes);
+  const db = await getDb();
+  return db.getAll('meetingTypes');
 }
 
 export async function getMeetingType(id: string): Promise<MeetingType | null> {
-  const types = await listMeetingTypes();
-  return types.find((t) => t.id === id) ?? null;
+  const db = await getDb();
+  return (await db.get('meetingTypes', id)) ?? null;
 }
 
 export async function createMeetingType(input: MeetingTypeInput): Promise<MeetingType> {
-  return transact(MEETING_TYPES_FILE, seedMeetingTypes, (types) => {
-    const now = nowIso();
-    const meetingType: MeetingType = {
-      id: randomUUID(),
-      title: input.title,
-      shortDescription: input.shortDescription,
-      prompt: input.prompt,
-      isBuiltIn: false,
-      createdAt: now,
-      updatedAt: now,
-    };
-    return { next: [...types, meetingType], result: meetingType };
-  });
+  const db = await getDb();
+  const now = nowIso();
+  const meetingType: MeetingType = {
+    id: newId(),
+    title: input.title,
+    shortDescription: input.shortDescription,
+    prompt: input.prompt,
+    isBuiltIn: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.put('meetingTypes', meetingType);
+  return meetingType;
 }
 
 export async function updateMeetingType(
   id: string,
   patch: Partial<MeetingTypeInput>
 ): Promise<MeetingType | null> {
-  return transact(MEETING_TYPES_FILE, seedMeetingTypes, (types) => {
-    const idx = types.findIndex((t) => t.id === id);
-    if (idx === -1) return { next: types, result: null };
-    const updated: MeetingType = {
-      ...types[idx],
-      ...patch,
-      id: types[idx].id,
-      isBuiltIn: types[idx].isBuiltIn,
-      createdAt: types[idx].createdAt,
-      updatedAt: nowIso(),
-    };
-    const next = [...types];
-    next[idx] = updated;
-    return { next, result: updated };
-  });
+  const db = await getDb();
+  const current: MeetingType | undefined = await db.get('meetingTypes', id);
+  if (!current) return null;
+  const updated: MeetingType = {
+    ...current,
+    ...patch,
+    id: current.id,
+    isBuiltIn: current.isBuiltIn,
+    createdAt: current.createdAt,
+    updatedAt: nowIso(),
+  };
+  await db.put('meetingTypes', updated);
+  return updated;
 }
 
 /** Throws if the meeting type is built-in (built-ins are editable, not deletable). */
 export async function deleteMeetingType(id: string): Promise<boolean> {
-  return transact(MEETING_TYPES_FILE, seedMeetingTypes, (types) => {
-    const idx = types.findIndex((t) => t.id === id);
-    if (idx === -1) return { next: types, result: false };
-    if (types[idx].isBuiltIn) {
-      throw new Error('לא ניתן למחוק סוג פגישה מובנה');
-    }
-    const next = types.filter((t) => t.id !== id);
-    return { next, result: true };
-  });
+  const db = await getDb();
+  const current: MeetingType | undefined = await db.get('meetingTypes', id);
+  if (!current) return false;
+  if (current.isBuiltIn) {
+    throw new Error('לא ניתן למחוק סוג פגישה מובנה');
+  }
+  await db.delete('meetingTypes', id);
+  return true;
+}
+
+/** Writes a meeting type verbatim (used only by seed-loader.ts, which supplies its own stable id). */
+export async function putMeetingTypeRaw(meetingType: MeetingType): Promise<void> {
+  const db = await getDb();
+  await db.put('meetingTypes', meetingType);
 }
 
 // ---------------------------------------------------------------------------
-// Org settings
+// Org settings — a single record under the kv store.
 // ---------------------------------------------------------------------------
 
 export async function getOrgSettings(): Promise<OrgSettings> {
-  return readJsonWithSeed<OrgSettings>(ORG_FILE, seedOrgSettings);
+  const existing = await getKv<OrgSettings>('orgSettings');
+  return existing ?? BLANK_ORG_SETTINGS;
 }
 
 export async function updateOrgSettings(
   patch: Partial<Omit<OrgSettings, 'updatedAt'>>
 ): Promise<OrgSettings> {
-  return transact(ORG_FILE, seedOrgSettings, (current) => {
-    const updated: OrgSettings = { ...current, ...patch, updatedAt: nowIso() };
-    return { next: updated, result: updated };
-  });
+  const current = await getOrgSettings();
+  const updated: OrgSettings = { ...current, ...patch, updatedAt: nowIso() };
+  await setKv('orgSettings', updated);
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
-// Meetings — one JSON file per meeting under data/meetings/<id>.json
+// Meetings
 // ---------------------------------------------------------------------------
 
-export type MeetingSummary = Omit<Meeting, 'transcript' | 'result'>;
+export type MeetingSummary = Omit<Meeting, 'transcript' | 'result' | 'files'>;
 
 export type MeetingCreateInput = {
   title: string;
   meetingTypeIds: string[];
   objective: string;
   participantIds: string[];
+  creatorParticipates?: boolean;
+  model: AvailableModel;
   files?: AttachedFile[];
   discussionRounds?: number;
 };
 
-function meetingFilePath(id: string): string {
-  return path.join(MEETINGS_DIR, `${id}.json`);
-}
-
-async function listMeetingIds(): Promise<string[]> {
-  await ensureDir(MEETINGS_DIR);
-  const entries = await fs.readdir(MEETINGS_DIR);
-  return entries.filter((f) => f.endsWith('.json') && !f.endsWith('.tmp')).map((f) => f.slice(0, -'.json'.length));
-}
-
 export function listMeetings(summaryOnly: true): Promise<MeetingSummary[]>;
 export function listMeetings(summaryOnly?: false): Promise<Meeting[]>;
 export async function listMeetings(summaryOnly = false): Promise<Meeting[] | MeetingSummary[]> {
-  const ids = await listMeetingIds();
-  const meetings: Meeting[] = [];
-  for (const id of ids) {
-    const meeting = await getMeeting(id);
-    if (meeting) meetings.push(meeting);
-  }
+  const db = await getDb();
+  const meetings: Meeting[] = await db.getAll('meetings');
   meetings.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   if (!summaryOnly) return meetings;
-  return meetings.map(({ transcript: _transcript, result: _result, ...rest }) => rest);
+  return meetings.map(({ transcript: _transcript, result: _result, files: _files, ...rest }) => rest);
 }
 
 export async function getMeeting(id: string): Promise<Meeting | null> {
-  const filePath = meetingFilePath(id);
-  if (!(await fileExists(filePath))) return null;
-  const raw = await fs.readFile(filePath, 'utf-8');
-  try {
-    return JSON.parse(raw) as Meeting;
-  } catch {
-    return null;
-  }
+  const db = await getDb();
+  return (await db.get('meetings', id)) ?? null;
 }
 
 export async function createMeeting(input: MeetingCreateInput): Promise<Meeting> {
+  const db = await getDb();
   const now = nowIso();
   const meeting: Meeting = {
-    id: randomUUID(),
+    id: newId(),
     title: input.title,
     meetingTypeIds: input.meetingTypeIds,
     objective: input.objective,
     participantIds: input.participantIds,
+    creatorParticipates: input.creatorParticipates ?? false,
+    model: input.model,
     files: input.files ?? [],
     discussionRounds: input.discussionRounds ?? 2,
     status: 'draft' as MeetingStatus,
     transcript: [],
     result: null,
     error: null,
-    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, apiCalls: 0 },
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
     createdAt: now,
     updatedAt: now,
     completedAt: null,
   };
-  await writeJsonLocked(meetingFilePath(meeting.id), meeting);
+  await db.put('meetings', meeting);
   return meeting;
 }
 
 /**
  * Shallow-merges `patch` onto the stored meeting and persists it. This is the
- * function the meeting engine calls after every phase, so it goes through the
- * same per-file lock as everything else touching this path.
+ * function the meeting engine calls after every phase.
  */
 export async function updateMeeting(id: string, patch: Partial<Meeting>): Promise<Meeting | null> {
-  const filePath = meetingFilePath(id);
-  return withFileLock(filePath, async () => {
-    if (!(await fileExists(filePath))) return null;
-    const raw = await fs.readFile(filePath, 'utf-8');
-    let current: Meeting;
-    try {
-      current = JSON.parse(raw) as Meeting;
-    } catch {
-      return null;
-    }
-    const updated: Meeting = {
-      ...current,
-      ...patch,
-      id: current.id,
-      createdAt: current.createdAt,
-      updatedAt: nowIso(),
-    };
-    await writeJsonAtomic(filePath, updated);
-    return updated;
-  });
+  const db = await getDb();
+  const current: Meeting | undefined = await db.get('meetings', id);
+  if (!current) return null;
+  const updated: Meeting = {
+    ...current,
+    ...patch,
+    id: current.id,
+    createdAt: current.createdAt,
+    updatedAt: nowIso(),
+  };
+  await db.put('meetings', updated);
+  return updated;
 }
 
 /** Persist an updated files[] array on a meeting's shared background files. */
@@ -429,103 +332,38 @@ export async function setMeetingFiles(id: string, files: AttachedFile[]): Promis
 }
 
 export async function deleteMeeting(id: string): Promise<boolean> {
-  const filePath = meetingFilePath(id);
-  if (!(await fileExists(filePath))) return false;
-  await fs.rm(filePath, { force: true });
-  await fs.rm(`${filePath}.tmp`, { force: true }).catch(() => undefined);
+  const db = await getDb();
+  const existing = await db.get('meetings', id);
+  if (!existing) return false;
+  await db.delete('meetings', id);
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// Uploads
+// Uploads — extraction only now; there is no disk to write to. The resulting
+// AttachedFile is stored inline on the persona/meeting record in IndexedDB.
 // ---------------------------------------------------------------------------
 
-/** Strip path separators, `..`, and control characters from a user-supplied filename. */
-export function sanitizeFilename(name: string): string {
-  const base = path.basename(name).replace(/\.\./g, '');
-  // eslint-disable-next-line no-control-regex
-  let sanitized = base.replace(/[\x00-\x1f\x7f]/g, '');
-  sanitized = sanitized.replace(/[/\\?%*:|"<>]/g, '_').trim();
-  if (!sanitized || sanitized === '.' || sanitized === '..') sanitized = 'file';
-  return sanitized;
-}
-
-function sanitizeOwnerId(ownerId: string): string {
-  const cleaned = ownerId.replace(/[^a-zA-Z0-9_-]/g, '');
-  if (!cleaned) throw new Error('מזהה בעלים לא תקין');
-  return cleaned;
-}
-
-/** Web-standard `File`-like shape — matches both the DOM `File` type and Node's undici `File`. */
-export interface UploadableFile {
-  name: string;
-  type: string;
-  size: number;
-  arrayBuffer(): Promise<ArrayBuffer>;
-}
-
-export async function saveUpload(ownerId: string, file: UploadableFile): Promise<AttachedFile> {
+/** Never throws for extraction failures (see extract.ts); throws only on validation (size/type). */
+export async function saveUpload(file: File): Promise<AttachedFile> {
   if (file.size > MAX_UPLOAD_BYTES) {
     throw new Error('הקובץ גדול מדי — הגודל המקסימלי המותר הוא 10MB');
   }
-  const ext = path.extname(file.name).toLowerCase();
+  const ext = extensionOf(file.name);
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     throw new Error(`סוג קובץ לא נתמך: ${ext || '(ללא סיומת)'}. הסיומות המותרות: ${ALLOWED_EXTENSIONS.join(', ')}`);
   }
 
-  const safeOwnerId = sanitizeOwnerId(ownerId);
-  const fileId = randomUUID();
-  const sanitizedName = sanitizeFilename(file.name);
-  const storedRelPath = path.join('uploads', safeOwnerId, `${fileId}__${sanitizedName}`);
-  const fullPath = path.join(DATA_DIR, storedRelPath);
-
-  // Path-traversal guard: the resolved path must remain inside data/uploads/.
-  const resolvedUploadsRoot = path.resolve(UPLOADS_DIR) + path.sep;
-  const resolvedFullPath = path.resolve(fullPath);
-  if (!resolvedFullPath.startsWith(resolvedUploadsRoot)) {
-    throw new Error('נתיב קובץ לא חוקי');
-  }
-
-  await ensureDir(path.dirname(fullPath));
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(fullPath, buffer);
-
-  const extraction = await extractText(fullPath, ext);
+  const extraction = await extractText(file, ext);
 
   return {
-    id: fileId,
+    id: newId(),
     name: file.name,
     mimeType: file.type || 'application/octet-stream',
     sizeBytes: file.size,
-    storedPath: storedRelPath,
+    storedPath: '',
     extractedText: extraction.text,
     extractionError: extraction.error,
     addedAt: nowIso(),
   };
 }
-
-export async function deleteUpload(ownerId: string, fileId: string): Promise<void> {
-  const safeOwnerId = sanitizeOwnerId(ownerId);
-  const dir = path.join(UPLOADS_DIR, safeOwnerId);
-  const resolvedUploadsRoot = path.resolve(UPLOADS_DIR) + path.sep;
-  const resolvedDir = path.resolve(dir);
-  if (!resolvedDir.startsWith(resolvedUploadsRoot)) {
-    throw new Error('נתיב קובץ לא חוקי');
-  }
-  let entries: string[] = [];
-  try {
-    entries = await fs.readdir(dir);
-  } catch {
-    return;
-  }
-  const match = entries.find((e) => e.startsWith(`${fileId}__`));
-  if (!match) return;
-  await fs.rm(path.join(dir, match), { force: true });
-}
-
-// Exposed for tests / advanced callers that need the raw path constants.
-export const _internal = {
-  DATA_DIR,
-  UPLOADS_DIR,
-  MEETINGS_DIR,
-};

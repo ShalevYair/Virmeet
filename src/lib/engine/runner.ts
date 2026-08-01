@@ -5,7 +5,6 @@
 // free-form round-robin. See prompts.ts for the Hebrew prompt text and
 // schemas.ts for the structured-output JSON schemas.
 
-import { randomUUID } from 'crypto';
 import {
   Meeting,
   MeetingResult,
@@ -13,9 +12,10 @@ import {
   OrgSettings,
   Persona,
   TranscriptEntry,
+  UNASSIGNED_TASK_OWNER_FALLBACK,
 } from '../types';
-import { MODELS } from '../types';
-import { callModel as realCallModel, CallModelResult } from '../anthropic';
+import { callModel as realCallModel } from '../gemini';
+import { CallModelResult } from '../llm-types';
 import {
   getMeeting as storeGetMeeting,
   getOrgSettings as storeGetOrgSettings,
@@ -37,7 +37,25 @@ const defaultDeps: RunMeetingDeps = {
   getOrgSettings: storeGetOrgSettings,
 };
 
+// The model reports ownerName as UNASSIGNED_OWNER_NAME when it can't tie a
+// task to a specific participant (see EXTRACTION_SCHEMA / the extraction
+// prompt). Rather than shipping a task with no owner, we hand it to the
+// project manager (UNASSIGNED_TASK_OWNER_FALLBACK) — the seed persona whose
+// whole job is exactly this ("משימה שאין לה בעלים ברור").
+const UNASSIGNED_OWNER_NAME = 'לא שויך';
+
+/** Resolves a task's raw owner name to who it should actually be assigned to, falling back to the project manager when the model reports no clear owner. */
+export function resolveTaskOwnerName(rawOwnerName: string): string {
+  const trimmed = rawOwnerName.trim();
+  return trimmed === '' || trimmed === UNASSIGNED_OWNER_NAME ? UNASSIGNED_TASK_OWNER_FALLBACK : trimmed;
+}
+
 const REGULAR_MAX_TOKENS = 8000;
+// The extraction call is the only one that must emit the entire
+// EXTRACTION_SCHEMA in one response, and it runs at effort:'high' — where
+// thinking tokens come out of the same budget. A truncation here loses the
+// whole meeting's output, so it gets its own, larger budget.
+const EXTRACTION_MAX_TOKENS = 20000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -56,7 +74,7 @@ function makeEntry(
   extra: Partial<Pick<TranscriptEntry, 'round' | 'webSearches' | 'usage'>> = {}
 ): TranscriptEntry {
   return {
-    id: randomUUID(),
+    id: crypto.randomUUID(),
     phase,
     speakerId,
     speakerName,
@@ -68,28 +86,38 @@ function makeEntry(
 
 /**
  * Runs a meeting end-to-end through all five phases, streaming events via
- * `onEvent` and persisting to disk after every phase transition and every
- * transcript entry. Never rejects: unexpected failures are reported through
- * `onEvent({type:'error', ...})` and, where applicable, by marking the
- * meeting `status:'failed'` — callers (the SSE route) just drain events until
- * this promise settles.
+ * `onEvent` and persisting to IndexedDB after every phase transition and
+ * every transcript entry. Never rejects: unexpected failures are reported
+ * through `onEvent({type:'error', ...})` and, where applicable, by marking
+ * the meeting `status:'failed'` — callers just drain events until this
+ * promise settles.
  *
  * `overrideDeps` exists purely for tests: production callers should invoke
- * `runMeeting(meetingId, onEvent)` and let it use the real store + Anthropic
- * client.
+ * `runMeeting(meetingId, onEvent)` and let it use the real store + the
+ * Gemini client (see ../gemini.ts).
  *
- * `apiKey` — when the run route received one from the browser's
- * x-anthropic-api-key header — is forwarded to every model call below and
- * nowhere else: it is never added to `meeting`, `transcript`, or any
- * persisted patch, so it can't reach data/ or the exported transcript.
+ * `apiKey` — the personal Gemini key read out of localStorage in the browser
+ * (see api-key.ts) — is forwarded to every model call below and nowhere
+ * else: it is never added to `meeting`, `transcript`, or any persisted
+ * patch, so it can't reach IndexedDB or the exported transcript.
+ *
+ * `signal` — when aborted, the run stops at the next checkpoint (see
+ * `abortIfCancelled`) instead of running to completion in the background.
+ * The meeting is marked `status:'cancelled'`; the transcript and usage
+ * accumulated so far are preserved.
  */
 export async function runMeeting(
   meetingId: string,
   onEvent: OnEvent,
   overrideDeps: Partial<RunMeetingDeps> = {},
-  apiKey?: string
+  apiKey?: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const deps: RunMeetingDeps = { ...defaultDeps, ...overrideDeps };
+
+  function isAborted(): boolean {
+    return signal?.aborted === true;
+  }
 
   const meeting = await deps.getMeeting(meetingId);
   if (!meeting) {
@@ -120,12 +148,24 @@ export async function runMeeting(
   // fields that don't change during a run (title/objective/files/rounds) —
   // everything that *does* change lives in these locals.
   let transcript: TranscriptEntry[] = [...meeting.transcript];
-  let usage = { ...meeting.usage };
+  // A meeting persisted before cacheWriteTokens existed has no such field in
+  // IndexedDB — default it, or `undefined + n` below silently poisons every
+  // subsequent usage number with NaN. (IndexedDB doesn't enforce the type
+  // above at the record level, so this can happen despite the static type.)
+  let usage: Meeting['usage'] = { ...meeting.usage, cacheWriteTokens: meeting.usage.cacheWriteTokens ?? 0 };
 
   const budget = new CallBudget(new Map(participants.map((p) => [p.id, p.maxApiCalls])));
 
   async function persist(patch: Partial<Meeting> = {}): Promise<void> {
-    await deps.updateMeeting(meetingId, { transcript, usage, ...patch });
+    const fullPatch: Partial<Meeting> = { transcript, usage, ...patch };
+    // A cancelled run must never have a later write resurrect it as
+    // 'running' or 'completed' — transcript/usage still get through, so
+    // whatever was already said (and already paid for) is preserved.
+    if (isAborted()) {
+      delete fullPatch.status;
+      delete fullPatch.completedAt;
+    }
+    await deps.updateMeeting(meetingId, fullPatch);
   }
 
   async function emitEntry(entry: TranscriptEntry): Promise<void> {
@@ -139,6 +179,22 @@ export async function runMeeting(
     await persist({ status: 'running' });
   }
 
+  /**
+   * Checkpoint called at every point the run could safely stop. Returns
+   * `true` (after logging a system line, marking the meeting `cancelled`,
+   * and emitting `{type:'cancelled'}`) iff `signal` was aborted — callers
+   * must `return` immediately when it does.
+   */
+  async function abortIfCancelled(phase: PhaseName, round?: number): Promise<boolean> {
+    if (!isAborted()) return false;
+    await emitEntry(
+      makeEntry(phase, 'system', 'מערכת', 'הפגישה בוטלה על ידי המשתמש. הדיון נעצר.', round !== undefined ? { round } : {})
+    );
+    await deps.updateMeeting(meetingId, { status: 'cancelled' });
+    onEvent({ type: 'cancelled' });
+    return true;
+  }
+
   function recordApiCall(): void {
     usage = { ...usage, apiCalls: usage.apiCalls + 1 };
   }
@@ -149,14 +205,17 @@ export async function runMeeting(
       inputTokens: usage.inputTokens + u.inputTokens,
       outputTokens: usage.outputTokens + u.outputTokens,
       cacheReadTokens: usage.cacheReadTokens + u.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens + u.cacheWriteTokens,
     };
   }
 
+  if (await abortIfCancelled('prep')) return;
   await persist({ status: 'running', error: null });
 
   // -------------------------------------------------------------------
   // Phase 0 — prep (parallel, no visibility into other personas' output)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('prep')) return;
   await emitPhase('prep');
   const prepResults = new Map<string, PrepOutput>();
 
@@ -165,14 +224,15 @@ export async function runMeeting(
       recordApiCall();
       try {
         const result = await deps.callModel({
-          model: persona.model,
-          system: prompts.buildPersonaSystemBlocks(org, persona),
+          model: meeting.model,
+          system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
           messages: [{ role: 'user', content: prompts.buildPrepUserMessage(meeting, meetingTypes) }],
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
           jsonSchema: PREP_SCHEMA,
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
           apiKey,
+          signal,
         });
         return result;
       } finally {
@@ -181,6 +241,8 @@ export async function runMeeting(
     })
   );
 
+  if (await abortIfCancelled('prep')) return;
+
   // Process in participant order (not settle order) so the transcript reads
   // deterministically even though the calls above ran concurrently.
   for (let i = 0; i < participants.length; i++) {
@@ -188,9 +250,15 @@ export async function runMeeting(
     const attempt = prepAttempts[i];
 
     if (attempt.status === 'rejected') {
-      await emitEntry(
-        makeEntry('prep', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(attempt.reason)))
-      );
+      // A cancelled run aborts every in-flight prep call at once — those
+      // rejections are the cancellation, not a persona failure, and the
+      // cancellation line (written by abortIfCancelled right after this
+      // loop) shouldn't be preceded by a wall of fake per-persona errors.
+      if (!isAborted()) {
+        await emitEntry(
+          makeEntry('prep', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(attempt.reason)))
+        );
+      }
       continue;
     }
 
@@ -199,6 +267,11 @@ export async function runMeeting(
 
     if (result.refused) {
       await emitEntry(makeEntry('prep', 'system', 'מערכת', prompts.personaRefusedLine(persona.name)));
+      continue;
+    }
+
+    if (result.truncated) {
+      await emitEntry(makeEntry('prep', 'system', 'מערכת', prompts.personaTruncatedInPrepLine(persona.name)));
       continue;
     }
 
@@ -227,14 +300,15 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   // Phase 1 — opening (facilitator, single call)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('opening')) return;
   await emitPhase('opening');
   let opening: OpeningOutput = { framing: '', conflicts: [] };
   {
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: MODELS.facilitator,
-        system: prompts.buildFacilitatorSystemBlocks(org),
+        model: meeting.model,
+        system: prompts.buildFacilitatorSystemBlocks(org, meeting),
         messages: [
           {
             role: 'user',
@@ -245,6 +319,7 @@ export async function runMeeting(
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
         apiKey,
+        signal,
       });
       recordTokens(result.usage);
 
@@ -256,6 +331,12 @@ export async function runMeeting(
         await emitEntry(
           makeEntry('opening', 'system', 'מערכת', 'המנחה סירב לספק מסגור לפגישה. ממשיכים עם מסגור בסיסי.')
         );
+      } else if (result.truncated) {
+        opening = {
+          framing: 'תשובת המנחה בשלב הפתיחה נקטעה בשל מגבלת אורך — יש להתייחס לתמליל ההכנה של המשתתפים בלבד.',
+          conflicts: [],
+        };
+        await emitEntry(makeEntry('opening', 'system', 'מערכת', prompts.facilitatorTruncatedInOpeningLine()));
       } else {
         opening = JSON.parse(result.text) as OpeningOutput;
         const conflictsText = opening.conflicts
@@ -275,25 +356,32 @@ export async function runMeeting(
         framing: 'שלב הפתיחה נכשל — הדיון ימשיך ללא מסגור מהמנחה, ישירות מתוך שלב ההכנה.',
         conflicts: [],
       };
-      await emitEntry(
-        makeEntry(
-          'opening',
-          'system',
-          'מערכת',
-          `שלב הפתיחה נכשל (${errorMessage(err)}). ממשיכים לדיון עם מסגור בסיסי.`
-        )
-      );
+      // A cancelled run aborts the in-flight call, which rejects here — that's
+      // the cancellation, not a real facilitator failure; don't write a fake
+      // error line ahead of the cancellation line abortIfCancelled adds next.
+      if (!isAborted()) {
+        await emitEntry(
+          makeEntry(
+            'opening',
+            'system',
+            'מערכת',
+            `שלב הפתיחה נכשל (${errorMessage(err)}). ממשיכים לדיון עם מסגור בסיסי.`
+          )
+        );
+      }
     }
   }
 
   // -------------------------------------------------------------------
   // Phase 2 — discussion (N rounds, sequential turns)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('discussion')) return;
   await emitPhase('discussion');
   const totalRounds = meeting.discussionRounds;
 
   for (let round = 1; round <= totalRounds; round++) {
     for (const persona of participants) {
+      if (await abortIfCancelled('discussion', round)) return;
       if (!budget.canCall(persona.id)) {
         if (budget.shouldAnnounceExhausted(persona.id)) {
           await emitEntry(
@@ -306,8 +394,8 @@ export async function runMeeting(
       recordApiCall();
       try {
         const result = await deps.callModel({
-          model: persona.model,
-          system: prompts.buildPersonaSystemBlocks(org, persona),
+          model: meeting.model,
+          system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
           messages: [
             {
               role: 'user',
@@ -326,6 +414,7 @@ export async function runMeeting(
           effort: 'medium',
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
           apiKey,
+          signal,
         });
         budget.record(persona.id);
         recordTokens(result.usage);
@@ -338,19 +427,42 @@ export async function runMeeting(
         }
 
         await emitEntry(
-          makeEntry('discussion', persona.id, persona.name, result.text, {
-            round,
-            webSearches: result.webSearches.length ? result.webSearches : undefined,
-            usage: result.usage,
-          })
+          makeEntry(
+            'discussion',
+            persona.id,
+            persona.name,
+            result.truncated ? `${result.text}${prompts.discussionTruncatedSuffix()}` : result.text,
+            {
+              round,
+              webSearches: result.webSearches.length ? result.webSearches : undefined,
+              usage: result.usage,
+            }
+          )
         );
       } catch (err) {
         budget.record(persona.id);
-        await emitEntry(
-          makeEntry('discussion', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(err)), {
-            round,
-          })
-        );
+        // A cancelled run aborts the in-flight call, which rejects here —
+        // that's the cancellation, not this persona failing; the next loop
+        // iteration's abortIfCancelled writes the real cancellation line.
+        if (!isAborted()) {
+          await emitEntry(
+            makeEntry('discussion', 'system', 'מערכת', prompts.personaErrorLine(persona.name, errorMessage(err)), {
+              round,
+            })
+          );
+        }
+      }
+    }
+
+    // The meeting creator (a human, not a persona) gets one turn per round,
+    // after every persona has spoken — never billed against usage/budget,
+    // since it isn't a model call. `requestCreatorTurn` resolves with '' if
+    // the creator skips the round.
+    if (meeting.creatorParticipates && deps.requestCreatorTurn) {
+      if (await abortIfCancelled('discussion', round)) return;
+      const creatorText = (await deps.requestCreatorTurn({ round, totalRounds })).trim();
+      if (creatorText) {
+        await emitEntry(makeEntry('discussion', 'creator', 'יוצר הפגישה', creatorText, { round }));
       }
     }
   }
@@ -358,20 +470,22 @@ export async function runMeeting(
   // -------------------------------------------------------------------
   // Phase 3 — convergence (facilitator, single call)
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('convergence')) return;
   await emitPhase('convergence');
   let convergenceSummary = '';
   {
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: MODELS.facilitator,
-        system: prompts.buildFacilitatorSystemBlocks(org),
+        model: meeting.model,
+        system: prompts.buildFacilitatorSystemBlocks(org, meeting),
         messages: [
           { role: 'user', content: prompts.buildConvergenceUserMessage(meeting, meetingTypes, transcript) },
         ],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         apiKey,
+        signal,
       });
       recordTokens(result.usage);
 
@@ -384,14 +498,19 @@ export async function runMeeting(
       }
     } catch (err) {
       convergenceSummary = '(שלב ההתכנסות נכשל; יש להתבסס על התמליל המלא בלבד.)';
-      await emitEntry(
-        makeEntry(
-          'convergence',
-          'system',
-          'מערכת',
-          `שלב ההתכנסות נכשל (${errorMessage(err)}). ממשיכים לחילוץ המשימות ישירות מהתמליל.`
-        )
-      );
+      // A cancelled run aborts the in-flight call, which rejects here —
+      // that's the cancellation, not a real facilitator failure; don't write
+      // a fake error line ahead of the cancellation line added next.
+      if (!isAborted()) {
+        await emitEntry(
+          makeEntry(
+            'convergence',
+            'system',
+            'מערכת',
+            `שלב ההתכנסות נכשל (${errorMessage(err)}). ממשיכים לחילוץ המשימות ישירות מהתמליל.`
+          )
+        );
+      }
     }
   }
 
@@ -400,27 +519,32 @@ export async function runMeeting(
   // A failure here — and only here — marks the meeting `status:'failed'`.
   // The transcript accumulated above has already been persisted throughout.
   // -------------------------------------------------------------------
+  if (await abortIfCancelled('extraction')) return;
   await emitPhase('extraction');
   try {
     recordApiCall();
     const result = await deps.callModel({
-      model: MODELS.facilitator,
-      system: prompts.buildFacilitatorSystemBlocks(org),
+      model: meeting.model,
+      system: prompts.buildFacilitatorSystemBlocks(org, meeting),
       messages: [
         {
           role: 'user',
           content: prompts.buildExtractionUserMessage(meeting, meetingTypes, participants, transcript, convergenceSummary),
         },
       ],
-      maxTokens: REGULAR_MAX_TOKENS,
+      maxTokens: EXTRACTION_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
       apiKey,
+      signal,
     });
     recordTokens(result.usage);
 
     if (result.refused) {
       throw new Error('המנחה סירב לספק את חילוץ המשימות והתוצאות של הפגישה.');
+    }
+    if (result.truncated) {
+      throw new Error(prompts.extractionTruncatedError());
     }
 
     const raw = JSON.parse(result.text) as ExtractionModelOutput;
@@ -433,20 +557,24 @@ export async function runMeeting(
       conflicts: raw.conflicts,
       risks: raw.risks,
       modelAssumptions: raw.modelAssumptions,
-      tasks: raw.tasks.map((t) => ({
-        id: randomUUID(),
-        title: t.title,
-        description: t.description,
-        ownerPersonaId: personaIdByName.get(t.ownerName) ?? null,
-        ownerName: t.ownerName,
-        priority: t.priority,
-        dependsOn: t.dependsOn,
-        assumption: t.assumption,
-        riskIfAssumptionWrong: t.riskIfAssumptionWrong,
-      })),
+      tasks: raw.tasks.map((t) => {
+        const ownerName = resolveTaskOwnerName(t.ownerName);
+        return {
+          id: crypto.randomUUID(),
+          title: t.title,
+          description: t.description,
+          ownerPersonaId: personaIdByName.get(ownerName) ?? null,
+          ownerName,
+          priority: t.priority,
+          dependsOn: t.dependsOn,
+          assumption: t.assumption,
+          riskIfAssumptionWrong: t.riskIfAssumptionWrong,
+        };
+      }),
     };
 
-    await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null });
+    const title = raw.title.trim() || meeting.title;
+    await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null, title });
     onEvent({ type: 'done', result: finalResult });
   } catch (err) {
     const message = errorMessage(err);
