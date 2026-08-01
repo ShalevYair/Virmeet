@@ -34,59 +34,52 @@ beforeEach(() => {
 });
 
 describe('runMeeting — pre-flight API key check', () => {
-  it("stops before the first model call and names the participants whose model has no matching key", async () => {
-    const claude1 = makePersona({ name: 'ארכיטקט תשתיות', model: 'claude-sonnet-5' });
-    const claude2 = makePersona({ name: 'מנהל פרויקט', model: 'claude-sonnet-5' });
-    const gemini1 = makePersona({ name: 'מומחה אבטחה', model: 'gemini-3.1-pro-preview' });
+  it('stops before the first model call when no Gemini key is stored', async () => {
+    const p1 = makePersona({ name: 'ארכיטקט תשתיות' });
+    const p2 = makePersona({ name: 'מנהל פרויקט' });
+    const meeting = makeMeeting({ participantIds: [p1.id, p2.id], status: 'draft' });
+
+    getMeetingMock.mockResolvedValue(meeting);
+    listPersonasMock.mockResolvedValue([p1, p2]);
+    getStoredApiKeyMock.mockReturnValue(null);
+
+    const onError = vi.fn();
+    await runMeeting(meeting.id, { onError });
+
+    expect(engineRunMeetingMock).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0][0] as string).toContain('Gemini');
+  });
+
+  it('stops before any model call when the meeting has an unrecognized model id', async () => {
+    const p1 = makePersona({ name: 'ארכיטקט תשתיות' });
+    const p2 = makePersona({ name: 'מנהל פרויקט' });
     const meeting = makeMeeting({
-      participantIds: [claude1.id, claude2.id, gemini1.id],
+      participantIds: [p1.id, p2.id],
       status: 'draft',
+      model: 'gemini-2.0-flash' as never,
     });
 
     getMeetingMock.mockResolvedValue(meeting);
-    listPersonasMock.mockResolvedValue([claude1, claude2, gemini1]);
-    // Only a Gemini key was entered — matches the plan's first-run scenario.
-    getStoredApiKeyMock.mockImplementation((provider: string) => (provider === 'gemini' ? 'gem-key' : null));
+    listPersonasMock.mockResolvedValue([p1, p2]);
+    getStoredApiKeyMock.mockReturnValue('gem-key');
 
     const onError = vi.fn();
     await runMeeting(meeting.id, { onError });
 
     expect(engineRunMeetingMock).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
-    const message = onError.mock.calls[0][0] as string;
-    expect(message).toContain(claude1.name);
-    expect(message).toContain(claude2.name);
-    expect(message).not.toContain(gemini1.name);
+    expect(onError.mock.calls[0][0] as string).toContain('gemini-2.0-flash');
   });
 
-  it('stops before any model call when a participant has an unrecognized model id', async () => {
-    const known = makePersona({ name: 'ארכיטקט תשתיות', model: 'claude-sonnet-5' });
-    const unknown = makePersona({ name: 'מומחה חיצוני', model: 'gemini-2.0-flash' });
-    const meeting = makeMeeting({ participantIds: [known.id, unknown.id], status: 'draft' });
+  it('proceeds to the engine once a Gemini key is stored', async () => {
+    const p1 = makePersona({ name: 'ארכיטקט תשתיות' });
+    const p2 = makePersona({ name: 'מנהל פרויקט' });
+    const meeting = makeMeeting({ participantIds: [p1.id, p2.id], status: 'draft' });
 
     getMeetingMock.mockResolvedValue(meeting);
-    listPersonasMock.mockResolvedValue([known, unknown]);
-    getStoredApiKeyMock.mockImplementation(() => 'ant-key');
-
-    const onError = vi.fn();
-    await runMeeting(meeting.id, { onError });
-
-    expect(engineRunMeetingMock).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledTimes(1);
-    const message = onError.mock.calls[0][0] as string;
-    expect(message).toContain(unknown.name);
-    expect(message).toContain('gemini-2.0-flash');
-    expect(message).not.toContain(known.name);
-  });
-
-  it('proceeds to the engine once every participant model matches an available key', async () => {
-    const gemini1 = makePersona({ name: 'מומחה אבטחה', model: 'gemini-3.1-pro-preview' });
-    const claude1 = makePersona({ name: 'ארכיטקט תשתיות', model: 'claude-sonnet-5' });
-    const meeting = makeMeeting({ participantIds: [gemini1.id, claude1.id], status: 'draft' });
-
-    getMeetingMock.mockResolvedValue(meeting);
-    listPersonasMock.mockResolvedValue([gemini1, claude1]);
-    getStoredApiKeyMock.mockImplementation((provider: string) => (provider === 'gemini' ? 'gem-key' : 'ant-key'));
+    listPersonasMock.mockResolvedValue([p1, p2]);
+    getStoredApiKeyMock.mockReturnValue('gem-key');
     engineRunMeetingMock.mockResolvedValue(undefined);
 
     const onError = vi.fn();
@@ -99,7 +92,7 @@ describe('runMeeting — pre-flight API key check', () => {
 
 describe('runMeeting — resets transcript/usage before a re-run', () => {
   it('clears a previously-cancelled meeting\'s transcript and usage before the engine starts, so a re-run never accumulates onto stale state', async () => {
-    const persona = makePersona({ name: 'ארכיטקט', model: 'claude-sonnet-5' });
+    const persona = makePersona({ name: 'ארכיטקט' });
     const meeting = makeMeeting({
       participantIds: [persona.id, persona.id],
       status: 'cancelled',
@@ -118,7 +111,7 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
 
     getMeetingMock.mockResolvedValue(meeting);
     listPersonasMock.mockResolvedValue([persona]);
-    getStoredApiKeyMock.mockImplementation(() => 'ant-key');
+    getStoredApiKeyMock.mockReturnValue('gem-key');
     engineRunMeetingMock.mockResolvedValue(undefined);
 
     await runMeeting(meeting.id, {});
@@ -135,12 +128,12 @@ describe('runMeeting — resets transcript/usage before a re-run', () => {
   });
 
   it('is a no-op on a genuine first run of a draft meeting with an already-blank transcript', async () => {
-    const persona = makePersona({ name: 'ארכיטקט', model: 'claude-sonnet-5' });
+    const persona = makePersona({ name: 'ארכיטקט' });
     const meeting = makeMeeting({ participantIds: [persona.id, persona.id], status: 'draft' });
 
     getMeetingMock.mockResolvedValue(meeting);
     listPersonasMock.mockResolvedValue([persona]);
-    getStoredApiKeyMock.mockImplementation(() => 'ant-key');
+    getStoredApiKeyMock.mockReturnValue('gem-key');
     engineRunMeetingMock.mockResolvedValue(undefined);
 
     await runMeeting(meeting.id, {});

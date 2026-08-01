@@ -4,8 +4,8 @@
 // changed — they still call e.g. `personasApi.get(id)` and catch `ApiError`
 // exactly like they did against the old fetch()-based client.
 
-import type { AttachedFile, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
-import { getModelProvider, isKnownModel } from './types';
+import type { AttachedFile, AvailableModel, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
+import { isKnownModel } from './types';
 import * as store from './store';
 import type { MeetingSummary } from './store';
 import { runMeeting as engineRunMeeting } from './engine/runner';
@@ -70,7 +70,6 @@ export type PersonaInput = {
   organization: string;
   color: string;
   prompt: string;
-  model: string;
   webAccess: boolean;
   maxApiCalls: number;
   maxWebSearches: number;
@@ -90,7 +89,6 @@ function validatePersonaInput(input: Partial<PersonaInput>): void {
   if (input.organization !== undefined) requireNonEmpty(input.organization, 'ארגון');
   if (input.color !== undefined) requireNonEmpty(input.color, 'צבע');
   if (input.prompt !== undefined) requireNonEmpty(input.prompt, 'פרומפט');
-  if (input.model !== undefined) requireNonEmpty(input.model, 'מודל');
   validatePersonaRanges(input);
 }
 
@@ -195,6 +193,7 @@ export type MeetingCreateInput = {
   meetingTypeIds: string[];
   objective: string;
   participantIds: string[];
+  model: AvailableModel;
   discussionRounds?: number;
 };
 
@@ -227,6 +226,7 @@ export const meetingsApi = {
       requireNonEmpty(input.objective, 'מטרה');
       if (input.meetingTypeIds.length < 1) badRequest('יש לבחור לפחות סוג פגישה אחד.');
       if (input.participantIds.length < 2) badRequest('יש לבחור לפחות שני משתתפים.');
+      if (!isKnownModel(input.model)) badRequest('המודל שנבחר אינו נתמך.');
       if (input.discussionRounds !== undefined) requireIntInRange(input.discussionRounds, 1, 4, 'מספר סבבי דיון');
       await assertParticipantsAndTypesExist(input.participantIds, input.meetingTypeIds);
       return store.createMeeting(input);
@@ -316,12 +316,11 @@ export interface RunMeetingHandlers {
 export async function runMeeting(id: string, handlers: RunMeetingHandlers): Promise<void> {
   await ensureSeedLoaded();
 
-  const anthropicKey = getStoredApiKey('anthropic') ?? undefined;
-  const geminiKey = getStoredApiKey('gemini') ?? undefined;
+  const geminiKey = getStoredApiKey() ?? undefined;
 
-  if (!anthropicKey && !geminiKey) {
+  if (!geminiKey) {
     handlers.onError?.(
-      'לא הוגדר אף מפתח API — לא Anthropic ולא Gemini. יש להזין מפתח אישי במסך ההגדרות (Settings) לפני התחלת הפגישה.'
+      'לא נמצא מפתח API של Gemini בדפדפן הזה. יש להזין מפתח אישי במסך ההגדרות (Settings) לפני התחלת הפגישה.'
     );
     return;
   }
@@ -344,43 +343,12 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
     return;
   }
 
-  // The facilitator always has a usable model (pickFacilitatorModel falls
-  // back to whichever key exists), but a persona's model is whatever was
-  // configured for it — a user who only entered a Gemini key and never
-  // touched personas defaulting to Claude would otherwise only find out
-  // when every one of that persona's calls fails mid-run. Check before
-  // burning a single call.
-  const allPersonas = await store.listPersonas();
-  const personaById = new Map(allPersonas.map((p) => [p.id, p]));
-  const participants = meeting.participantIds
-    .map((pid) => personaById.get(pid))
-    .filter((p): p is (typeof allPersonas)[number] => p != null);
-
-  // Checked separately from (and before) the key check below: an unknown
-  // model id routes silently to Anthropic (getModelProvider's fallback), so
-  // folding this into blockedParticipants would surface the wrong message
-  // ("דרוש מפתח API שלא הוגדר") for a persona whose real problem is a model
-  // id this app doesn't know how to route at all — most likely a seed or
-  // JSON-imported persona (personas/edit's own <select> can't produce one).
-  const unknownModelParticipants = participants.filter((p) => !isKnownModel(p.model));
-  if (unknownModelParticipants.length > 0) {
-    const names = unknownModelParticipants.map((p) => `${p.name} (${p.model})`).join(', ');
+  // Defensive: a meeting created before AVAILABLE_MODELS changed, or edited
+  // directly in IndexedDB, could carry a model id this build no longer
+  // knows how to route. Catch that before burning a single call.
+  if (!isKnownModel(meeting.model)) {
     handlers.onError?.(
-      `לא ניתן להתחיל את הפגישה: למשתתפים הבאים מוגדר מזהה מודל לא מוכר — ${names}. יש לבחור מודל תקין במסך עריכת המשתתף.`
-    );
-    return;
-  }
-
-  const hasKeyFor = (model: string): boolean =>
-    getModelProvider(model) === 'gemini' ? !!geminiKey : !!anthropicKey;
-
-  const blockedParticipants = participants.filter((p) => !hasKeyFor(p.model)).map((p) => p.name);
-
-  if (blockedParticipants.length > 0) {
-    handlers.onError?.(
-      `לא ניתן להתחיל את הפגישה: למשתתפים הבאים דרוש מפתח API שלא הוגדר — ${blockedParticipants.join(
-        ', '
-      )}. יש להזין את המפתח החסר במסך ההגדרות (Settings), או להחליף את המודל של המשתתפים האלו למודל שתואם למפתח הקיים.`
+      `לא ניתן להתחיל את הפגישה: מוגדר לה מזהה מודל לא מוכר (${meeting.model}). יש ליצור פגישה חדשה ולבחור מודל תקין.`
     );
     return;
   }
@@ -425,7 +393,7 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
       }
     },
     {},
-    { anthropic: anthropicKey, gemini: geminiKey },
+    geminiKey,
     handlers.signal
   );
 }

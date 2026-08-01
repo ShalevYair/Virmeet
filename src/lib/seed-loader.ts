@@ -127,7 +127,6 @@ async function loadPersona(relPath: string, force: boolean): Promise<boolean> {
     organization: seed.organization,
     color: seed.color,
     prompt: seed.prompt,
-    model: seed.model,
     webAccess: seed.webAccess,
     maxApiCalls: seed.maxApiCalls,
     maxWebSearches: seed.maxWebSearches,

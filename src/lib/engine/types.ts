@@ -19,9 +19,8 @@ export type OnEvent = (event: MeetingEvent) => void;
 
 /**
  * The one seam the engine calls through to reach the model. Production code
- * passes the real `callModel` from src/lib/llm.ts, which dispatches to
- * Anthropic or Gemini by model id; tests inject a stub so runMeeting() never
- * has to hit a live API to be exercised.
+ * passes the real `callModel` from src/lib/gemini.ts; tests inject a stub so
+ * runMeeting() never has to hit a live API to be exercised.
  */
 export type CallModelFn = (opts: CallModelOptions) => Promise<CallModelResult>;
 

@@ -107,13 +107,13 @@ describe('runAttributionTest', () => {
       refused: false,
       truncated: false,
     });
-    vi.doMock('../llm', () => ({ callModel: callModelMock }));
+    vi.doMock('../gemini', () => ({ callModel: callModelMock }));
 
     const { runAttributionTest } = await import('./attribution');
     const guesses = await runAttributionTest(
       { items: [{ index: 0, text: 'משהו שנאמר' }], truth: new Map([[0, 'א']]) },
       participants,
-      { model: 'claude-sonnet-5', apiKey: 'k' }
+      { model: 'gemini-3.6-flash', apiKey: 'k' }
     );
 
     expect(guesses).toEqual([{ index: 0, personaName: 'א' }]);
@@ -124,6 +124,6 @@ describe('runAttributionTest', () => {
     // refactor that widens the type can't silently leak it.
     expect(promptText).not.toContain('prompt');
     expect(promptText).not.toContain('files');
-    vi.doUnmock('../llm');
+    vi.doUnmock('../gemini');
   });
 });

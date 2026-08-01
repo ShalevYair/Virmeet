@@ -1,12 +1,10 @@
-// Virmeet — provider-agnostic shapes for the model-call abstraction.
-// anthropic.ts and gemini.ts each implement callModel() against these types;
-// llm.ts dispatches between them by model id (see getModelProvider in types.ts).
+// Virmeet — shapes for the model-call abstraction implemented by gemini.ts.
+// Kept as a separate module (rather than folded into gemini.ts) so engine
+// code (runner.ts, prompts.ts) doesn't need to import the provider directly.
 
 export interface SystemBlock {
   type: 'text';
   text: string;
-  /** If true, a cache breakpoint is placed here. Anthropic supports up to 4. */
-  cacheBreakpoint?: boolean;
 }
 
 export interface CallModelMessage {
@@ -27,7 +25,7 @@ export interface CallModelOptions {
   webSearch?: WebSearchOptions;
   /** JSON schema for structured output. Must set additionalProperties:false and required on every field. */
   jsonSchema?: Record<string, unknown>;
-  /** Optional key sent by the browser for this run, preferred over the server-side env key for this model's provider. Never logged or persisted. */
+  /** The browser's personal Gemini key for this call. Never logged or persisted. */
   apiKey?: string;
   /** Aborts the in-flight provider request and any pending retry backoff. */
   signal?: AbortSignal;

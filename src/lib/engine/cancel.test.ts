@@ -60,7 +60,7 @@ describe('runMeeting cancellation', () => {
     deps.callModel = callModel;
 
     const events: MeetingEvent[] = [];
-    await runMeeting(meeting.id, (e) => events.push(e), deps, {}, controller.signal);
+    await runMeeting(meeting.id, (e) => events.push(e), deps, undefined, controller.signal);
 
     expect(callCount).toBe(5);
 
@@ -109,7 +109,7 @@ describe('runMeeting cancellation', () => {
     };
     deps.callModel = callModel;
 
-    await runMeeting(meeting.id, () => {}, deps, {}, controller.signal);
+    await runMeeting(meeting.id, () => {}, deps, undefined, controller.signal);
 
     expect(seenSignals.length).toBeGreaterThan(0);
     for (const signal of seenSignals) {
@@ -143,7 +143,7 @@ describe('runMeeting cancellation', () => {
     deps.callModel = callModel;
 
     const events: MeetingEvent[] = [];
-    await runMeeting(meeting.id, (e) => events.push(e), deps, {}, controller.signal);
+    await runMeeting(meeting.id, (e) => events.push(e), deps, undefined, controller.signal);
 
     expect(events.filter((e) => e.type === 'cancelled')).toHaveLength(1);
     const finalMeeting = (await deps.getMeeting(meeting.id)) as Meeting;

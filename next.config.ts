@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
 
-// @anthropic-ai/sdk and @google/genai statically import a handful of Node
-// builtins (fs, path, stream, ...) for code paths we never exercise in the
-// browser (OAuth credential files, Node-stream multipart uploads — we only
-// ever pass an explicit apiKey and plain JSON). Webpack's client bundle
-// target doesn't resolve the "node:" URI scheme at all by default, so the
-// build fails before it can even tree-shake that code away. Strip the
-// "node:" prefix and stub the bare builtins out for the client bundle.
+// @google/genai statically imports a handful of Node builtins (fs, path,
+// stream, ...) for code paths we never exercise in the browser (OAuth
+// credential files, Node-stream multipart uploads — we only ever pass an
+// explicit apiKey and plain JSON). Webpack's client bundle target doesn't
+// resolve the "node:" URI scheme at all by default, so the build fails
+// before it can even tree-shake that code away. Strip the "node:" prefix
+// and stub the bare builtins out for the client bundle.
 const NODE_BUILTINS_USED_SERVER_SIDE_ONLY = [
   "fs",
   "fs/promises",

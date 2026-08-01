@@ -1,47 +1,15 @@
 'use client';
 
-// Virmeet — lets a user paste a personal Anthropic and/or Gemini API key,
-// stored only in this browser's localStorage. Sent directly from this
-// browser to the Anthropic/Gemini API when a meeting runs (see
-// lib/anthropic.ts, lib/gemini.ts) — there is no server in between.
+// Virmeet — lets a user paste a personal Gemini API key, stored only in this
+// browser's localStorage. Sent directly from this browser to the Gemini API
+// when a meeting runs (see lib/gemini.ts) — there is no server in between.
 
 import { useEffect, useState } from 'react';
-import {
-  ApiKeyProvider,
-  clearStoredApiKey,
-  getStoredApiKey,
-  maskApiKey,
-  setStoredApiKey,
-} from '@/lib/api-key';
+import { clearStoredApiKey, getStoredApiKey, maskApiKey, setStoredApiKey } from '@/lib/api-key';
 import { testApiKey, type TestApiKeyResult } from '@/lib/api-key-test';
 import { Button, Card, Field, Spinner, inputClasses } from '@/components/ui';
 
-interface ProviderConfig {
-  provider: ApiKeyProvider;
-  label: string;
-  placeholder: string;
-  keyShapeHint: string;
-  looksValid: (key: string) => boolean;
-}
-
-const PROVIDERS: ProviderConfig[] = [
-  {
-    provider: 'anthropic',
-    label: 'Anthropic (Claude)',
-    placeholder: 'sk-ant-...',
-    keyShapeHint: 'מפתחות של Anthropic מתחילים ב-"sk-ant-"',
-    looksValid: (key) => key.startsWith('sk-ant-'),
-  },
-  {
-    provider: 'gemini',
-    label: 'Google (Gemini)',
-    placeholder: 'AIza...',
-    keyShapeHint: 'מפתחות של Gemini מתחילים בדרך כלל ב-"AIza"',
-    looksValid: (key) => key.startsWith('AIza'),
-  },
-];
-
-function ProviderKeyField({ config }: { config: ProviderConfig }) {
+export function ApiKeySettings() {
   const [storedKey, setStoredKeyState] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [visible, setVisible] = useState(false);
@@ -51,18 +19,18 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
   const [testResult, setTestResult] = useState<TestApiKeyResult | null>(null);
 
   useEffect(() => {
-    setStoredKeyState(getStoredApiKey(config.provider));
-  }, [config.provider]);
+    setStoredKeyState(getStoredApiKey());
+  }, []);
 
   const trimmedDraft = draft.trim();
-  const shapeWarning = trimmedDraft.length > 0 && !config.looksValid(trimmedDraft);
+  const shapeWarning = trimmedDraft.length > 0 && !trimmedDraft.startsWith('AIza');
   // Test whatever the user is actively looking at: the draft if they typed
   // one, otherwise the already-saved key.
   const keyToTest = trimmedDraft || storedKey || '';
 
   function handleSave() {
     if (!trimmedDraft) return;
-    setStoredApiKey(config.provider, trimmedDraft);
+    setStoredApiKey(trimmedDraft);
     setStoredKeyState(trimmedDraft);
     setDraft('');
     setVisible(false);
@@ -72,7 +40,7 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
   }
 
   function handleClear() {
-    clearStoredApiKey(config.provider);
+    clearStoredApiKey();
     setStoredKeyState(null);
     setSaved(false);
     setCleared(true);
@@ -84,7 +52,7 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await testApiKey(config.provider, keyToTest);
+      const result = await testApiKey(keyToTest);
       setTestResult(result);
     } catch (err) {
       setTestResult({ ok: false, message: err instanceof Error ? err.message : 'הבדיקה נכשלה.' });
@@ -94,17 +62,17 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
   }
 
   return (
-    <div className="flex flex-col gap-3 border-t border-black/10 pt-4 first:border-t-0 first:pt-0 dark:border-white/10">
+    <Card className="flex flex-col gap-4 p-5">
       <div>
-        <h3 className="text-sm font-semibold">{config.label}</h3>
+        <h2 className="text-sm font-semibold">מפתח API אישי של Gemini</h2>
         <p className="mt-1 text-sm text-black/60 dark:text-white/60">
           {storedKey
-            ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש למודלים של ${config.label} מהמכשיר הזה.`
-            : `לא שמור מפתח בדפדפן זה. יש להזין מפתח כאן כדי להריץ פגישות עם מודלים של ${config.label}.`}
+            ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש להרצת פגישות מהמכשיר הזה.`
+            : 'לא שמור מפתח בדפדפן זה. יש להזין מפתח כאן כדי להריץ פגישות.'}
         </p>
       </div>
 
-      <Field label="הדבקת מפתח חדש" hint={config.keyShapeHint}>
+      <Field label="הדבקת מפתח חדש" hint='מפתחות של Gemini מתחילים בדרך כלל ב-"AIza"'>
         <div className="flex gap-2">
           <input
             type={visible ? 'text' : 'password'}
@@ -117,7 +85,7 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
               setCleared(false);
               setTestResult(null);
             }}
-            placeholder={config.placeholder}
+            placeholder="AIza..."
             autoComplete="off"
             spellCheck={false}
           />
@@ -127,12 +95,12 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
         </div>
         {shapeWarning && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            שימו לב: המפתח לא נראה כמפתח {config.label} תקין. ניתן לשמור בכל זאת.
+            שימו לב: המפתח לא נראה כמפתח Gemini תקין. ניתן לשמור בכל זאת.
           </p>
         )}
       </Field>
 
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex items-center justify-end gap-3 border-t border-black/10 pt-4 dark:border-white/10">
         {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">נשמר ✓</span>}
         {cleared && <span className="text-sm text-black/50 dark:text-white/50">המפתח נמחק</span>}
         {testResult && (
@@ -161,30 +129,11 @@ function ProviderKeyField({ config }: { config: ProviderConfig }) {
           שמור
         </Button>
       </div>
-    </div>
-  );
-}
-
-export function ApiKeySettings() {
-  return (
-    <Card className="flex flex-col gap-4 p-5">
-      <div>
-        <h2 className="text-sm font-semibold">מפתחות API אישיים</h2>
-        <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-          בחרו מודל לכל פרסונה בעמוד המשתתפים, והזינו כאן את מפתח ה-API של הספק המתאים — Anthropic
-          עבור מודלי Claude, Google עבור מודלי Gemini. אין צורך להזין את שני המפתחות אם משתמשים בספק אחד בלבד.
-        </p>
-      </div>
-
-      {PROVIDERS.map((config) => (
-        <ProviderKeyField key={config.provider} config={config} />
-      ))}
 
       <p className="border-t border-black/10 pt-4 text-xs text-black/50 dark:border-white/10 dark:text-white/50">
-        Virmeet הוא אתר סטטי ללא שרת משלו — המפתחות נשמרים רק ב-localStorage של הדפדפן, על המכשיר הזה
-        בלבד, ונשלחים ישירות מהדפדפן אל ה-API של הספק המתאים (Anthropic / Google) כדי להריץ פגישה, בלי
-        לעבור דרך שום שרת של Virmeet. כל סקריפט שרץ בדף יכול לקרוא אותם, ולכן זה מתאים לשימוש אישי
-        במכשיר שלכם ולא למחשב משותף.
+        Virmeet הוא אתר סטטי ללא שרת משלו — המפתח נשמר רק ב-localStorage של הדפדפן, על המכשיר הזה בלבד,
+        ונשלח ישירות מהדפדפן אל ה-API של Gemini כדי להריץ פגישה, בלי לעבור דרך שום שרת של Virmeet. כל
+        סקריפט שרץ בדף יכול לקרוא אותו, ולכן זה מתאים לשימוש אישי במכשיר שלכם ולא למחשב משותף.
       </p>
     </Card>
   );

@@ -1,16 +1,14 @@
 // Virmeet — thin wrapper around @google/genai, called directly from the
-// browser, mirroring anthropic.ts's callModel() shape so llm.ts can dispatch
-// between the two providers without the engine caring which one is behind a
-// given model id. There is no server component anymore — every key comes
-// from the caller, which reads it out of localStorage (see api-key.ts).
+// browser. There is no server component — the key comes from the caller,
+// which reads it out of localStorage (see api-key.ts).
 
 import { GoogleGenAI, ApiError as GeminiApiError } from '@google/genai';
 import type { CallModelOptions, CallModelResult, CallModelUsage, SystemBlock } from './llm-types';
 
 /**
- * Constructs a Gemini client for `apiKey`. Mirrors anthropic.ts#getClient: a
- * fresh client is built on every call so a key never lingers beyond the call
- * that needed it. Throws a Hebrew error if no key was supplied.
+ * Constructs a Gemini client for `apiKey`. A fresh client is built on every
+ * call so a key never lingers beyond the call that needed it. Throws a
+ * Hebrew error if no key was supplied.
  */
 export function getClient(apiKey?: string): GoogleGenAI {
   if (!apiKey) {
@@ -86,8 +84,7 @@ function usageFrom(usage: { promptTokenCount?: number; candidatesTokenCount?: nu
     outputTokens: usage?.candidatesTokenCount ?? 0,
     cacheReadTokens: usage?.cachedContentTokenCount ?? 0,
     // Gemini's context caching is implicit — there's no separate cache-write
-    // request or token count to report, unlike Anthropic's explicit cache
-    // breakpoints. Always 0, intentionally, not a gap in this provider.
+    // request or token count to report. Always 0, intentionally, not a gap.
     cacheWriteTokens: 0,
   };
 }
@@ -96,8 +93,7 @@ const BLOCKED_FINISH_REASONS = new Set(['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLI
 
 /**
  * Single logical model call with retry (3 attempts, backoff 2s/4s/8s), retrying
- * only on 429 / 5xx from the Gemini API. Same CallModelOptions/CallModelResult
- * contract as anthropic.ts#callModel.
+ * only on 429 / 5xx from the Gemini API.
  */
 export async function callModel(opts: CallModelOptions): Promise<CallModelResult> {
   const ai = getClient(opts.apiKey);

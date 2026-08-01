@@ -44,12 +44,12 @@ function validExtraction(): CallModelResult {
   });
 }
 
-/** anthropic-style truncation: max_tokens cut a partial-but-nonempty response. */
+/** Truncation where max_tokens cuts off a partial-but-nonempty response. */
 function partialTruncated(): CallModelResult {
   return makeCallModelResult({ truncated: true, text: '{"understanding": "נקטע כאן' });
 }
 
-/** gemini-style truncation edge case: thinking ate the whole budget, text is empty. */
+/** Truncation edge case: thinking ate the whole budget, text is empty. */
 function emptyTruncated(): CallModelResult {
   return makeCallModelResult({ truncated: true, text: '' });
 }
@@ -85,13 +85,13 @@ async function runWithResponses(responses: CallModelResult[]) {
   });
 
   const events: MeetingEvent[] = [];
-  await runMeeting(meeting.id, (e) => events.push(e), deps, {});
+  await runMeeting(meeting.id, (e) => events.push(e), deps, undefined);
   const finalMeeting = (await deps.getMeeting(meeting.id)) as Meeting;
   return { events, finalMeeting, personaNames: { p1: p1.name, p2: p2.name } };
 }
 
 describe.each([
-  ['anthropic-style (partial text)', partialTruncated],
+  ['partial-text truncation', partialTruncated],
   ['gemini-style (empty text)', emptyTruncated],
 ])('truncated response in prep — %s', (_label, makeTruncated) => {
   it('logs a system line and excludes the persona from prep instead of crashing on JSON.parse', async () => {
@@ -109,7 +109,7 @@ describe.each([
 });
 
 describe.each([
-  ['anthropic-style (partial text)', partialTruncated],
+  ['partial-text truncation', partialTruncated],
   ['gemini-style (empty text)', emptyTruncated],
 ])('truncated response in opening — %s', (_label, makeTruncated) => {
   it('falls back to basic framing and logs a system line instead of crashing on JSON.parse', async () => {
@@ -127,7 +127,7 @@ describe.each([
 });
 
 describe.each([
-  ['anthropic-style (partial text)', partialTruncated],
+  ['partial-text truncation', partialTruncated],
   ['gemini-style (empty text)', emptyTruncated],
 ])('truncated response in discussion — %s', (_label, makeTruncated) => {
   it("marks the transcript entry with a visible truncation notice instead of presenting it as a complete statement", async () => {
@@ -142,7 +142,7 @@ describe.each([
 });
 
 describe.each([
-  ['anthropic-style (partial text)', partialTruncated],
+  ['partial-text truncation', partialTruncated],
   ['gemini-style (empty text)', emptyTruncated],
 ])('truncated response in extraction — %s', (_label, makeTruncated) => {
   it('fails the meeting with a readable Hebrew message instead of a JSON SyntaxError', async () => {

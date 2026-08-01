@@ -14,7 +14,6 @@
     "eval:attribution": "tsx scripts/eval-attribution.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
     "@google/genai": "^2.14.0",
     "idb": "^8.0.3",
     "mammoth": "^1.8.0",

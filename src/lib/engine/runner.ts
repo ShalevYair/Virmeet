@@ -13,8 +13,7 @@ import {
   Persona,
   TranscriptEntry,
 } from '../types';
-import { getModelProvider, pickFacilitatorModel } from '../types';
-import { callModel as realCallModel } from '../llm';
+import { callModel as realCallModel } from '../gemini';
 import { CallModelResult } from '../llm-types';
 import {
   getMeeting as storeGetMeeting,
@@ -41,9 +40,7 @@ const REGULAR_MAX_TOKENS = 8000;
 // The extraction call is the only one that must emit the entire
 // EXTRACTION_SCHEMA in one response, and it runs at effort:'high' — where
 // thinking tokens come out of the same budget. A truncation here loses the
-// whole meeting's output, so it gets its own, larger budget. The value is
-// deliberately above anthropic.ts#STREAMING_THRESHOLD so the Anthropic path
-// switches to streaming automatically.
+// whole meeting's output, so it gets its own, larger budget.
 const EXTRACTION_MAX_TOKENS = 20000;
 
 function nowIso(): string {
@@ -83,13 +80,12 @@ function makeEntry(
  *
  * `overrideDeps` exists purely for tests: production callers should invoke
  * `runMeeting(meetingId, onEvent)` and let it use the real store + the
- * Anthropic/Gemini clients (see ../llm.ts).
+ * Gemini client (see ../gemini.ts).
  *
- * `apiKeys` — personal keys read out of localStorage in the browser (see
- * api-key.ts) — are forwarded to every model call below (whichever key
- * matches that call's model provider) and nowhere else: they are never added
- * to `meeting`, `transcript`, or any persisted patch, so they can't reach
- * IndexedDB or the exported transcript.
+ * `apiKey` — the personal Gemini key read out of localStorage in the browser
+ * (see api-key.ts) — is forwarded to every model call below and nowhere
+ * else: it is never added to `meeting`, `transcript`, or any persisted
+ * patch, so it can't reach IndexedDB or the exported transcript.
  *
  * `signal` — when aborted, the run stops at the next checkpoint (see
  * `abortIfCancelled`) instead of running to completion in the background.
@@ -100,23 +96,14 @@ export async function runMeeting(
   meetingId: string,
   onEvent: OnEvent,
   overrideDeps: Partial<RunMeetingDeps> = {},
-  apiKeys: { anthropic?: string; gemini?: string } = {},
+  apiKey?: string,
   signal?: AbortSignal
 ): Promise<void> {
   const deps: RunMeetingDeps = { ...defaultDeps, ...overrideDeps };
 
-  /** The personal key (if any) matching `model`'s provider — Anthropic vs Gemini. */
-  function apiKeyFor(model: string): string | undefined {
-    return getModelProvider(model) === 'gemini' ? apiKeys.gemini : apiKeys.anthropic;
-  }
-
   function isAborted(): boolean {
     return signal?.aborted === true;
   }
-
-  // The facilitator doesn't have to run on Anthropic — a meeting where every
-  // key is Gemini-only should still complete end to end (see pickFacilitatorModel).
-  const facilitatorModel = pickFacilitatorModel(apiKeys);
 
   const meeting = await deps.getMeeting(meetingId);
   if (!meeting) {
@@ -223,14 +210,14 @@ export async function runMeeting(
       recordApiCall();
       try {
         const result = await deps.callModel({
-          model: persona.model,
+          model: meeting.model,
           system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
           messages: [{ role: 'user', content: prompts.buildPrepUserMessage(meeting, meetingTypes) }],
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
           jsonSchema: PREP_SCHEMA,
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
-          apiKey: apiKeyFor(persona.model),
+          apiKey,
           signal,
         });
         return result;
@@ -306,7 +293,7 @@ export async function runMeeting(
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: facilitatorModel,
+        model: meeting.model,
         system: prompts.buildFacilitatorSystemBlocks(org, meeting),
         messages: [
           {
@@ -317,7 +304,7 @@ export async function runMeeting(
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
         jsonSchema: OPENING_SCHEMA,
-        apiKey: apiKeyFor(facilitatorModel),
+        apiKey,
         signal,
       });
       recordTokens(result.usage);
@@ -393,7 +380,7 @@ export async function runMeeting(
       recordApiCall();
       try {
         const result = await deps.callModel({
-          model: persona.model,
+          model: meeting.model,
           system: prompts.buildPersonaSystemBlocks(org, persona, meeting),
           messages: [
             {
@@ -412,7 +399,7 @@ export async function runMeeting(
           maxTokens: REGULAR_MAX_TOKENS,
           effort: 'medium',
           webSearch: persona.webAccess ? { maxUses: persona.maxWebSearches } : undefined,
-          apiKey: apiKeyFor(persona.model),
+          apiKey,
           signal,
         });
         budget.record(persona.id);
@@ -464,14 +451,14 @@ export async function runMeeting(
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: facilitatorModel,
+        model: meeting.model,
         system: prompts.buildFacilitatorSystemBlocks(org, meeting),
         messages: [
           { role: 'user', content: prompts.buildConvergenceUserMessage(meeting, meetingTypes, transcript) },
         ],
         maxTokens: REGULAR_MAX_TOKENS,
         effort: 'high',
-        apiKey: apiKeyFor(facilitatorModel),
+        apiKey,
         signal,
       });
       recordTokens(result.usage);
@@ -511,7 +498,7 @@ export async function runMeeting(
   try {
     recordApiCall();
     const result = await deps.callModel({
-      model: facilitatorModel,
+      model: meeting.model,
       system: prompts.buildFacilitatorSystemBlocks(org, meeting),
       messages: [
         {
@@ -522,7 +509,7 @@ export async function runMeeting(
       maxTokens: EXTRACTION_MAX_TOKENS,
       effort: 'high',
       jsonSchema: EXTRACTION_SCHEMA,
-      apiKey: apiKeyFor(facilitatorModel),
+      apiKey,
       signal,
     });
     recordTokens(result.usage);

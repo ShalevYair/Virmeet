@@ -1,41 +1,16 @@
 // Virmeet — data model (spec §0-1). Do not change model IDs or add date suffixes.
 
-export const MODELS = {
-  persona: 'claude-sonnet-5', // ברירת מחדל לפרסונה
-  facilitator: 'claude-opus-5', // מנחה + חילוץ משימות — כברירת מחדל, כשיש מפתח Anthropic
-  facilitatorGemini: 'gemini-3.1-pro-preview', // המנחה כשיש רק מפתח Gemini (ראו pickFacilitatorModel)
-} as const;
-
-export const ANTHROPIC_MODELS = ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'] as const;
-export const GEMINI_MODELS = ['gemini-3.1-pro-preview', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'] as const;
-
-export const AVAILABLE_MODELS = [...ANTHROPIC_MODELS, ...GEMINI_MODELS] as const;
+// Google's three Gemini tiers, chosen once per meeting (not per persona) and
+// used for every call in that meeting — facilitator and personas alike.
+export const AVAILABLE_MODELS = ['gemini-3.1-pro-preview', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'] as const;
 
 export type AvailableModel = (typeof AVAILABLE_MODELS)[number];
 
-export type ModelProvider = 'anthropic' | 'gemini';
-
-/** Which provider a given model id belongs to — decides which API key/client a call uses. */
-export function getModelProvider(model: string): ModelProvider {
-  return (GEMINI_MODELS as readonly string[]).includes(model) ? 'gemini' : 'anthropic';
-}
+export const DEFAULT_MODEL: AvailableModel = 'gemini-3.6-flash';
 
 /** True iff `model` is one of the ids this app actually knows how to route (see AVAILABLE_MODELS). */
 export function isKnownModel(model: string): boolean {
   return (AVAILABLE_MODELS as readonly string[]).includes(model);
-}
-
-/**
- * The facilitator (opening/convergence/extraction phases) needs *some* model,
- * but doesn't have to be Anthropic specifically — a user who only has a
- * Gemini key should still be able to run a full meeting. Prefer Anthropic
- * when that key is available (its structured-output/refusal handling is the
- * facilitator's primary target); fall back to Gemini otherwise.
- */
-export function pickFacilitatorModel(apiKeys: { anthropic?: string; gemini?: string }): string {
-  if (apiKeys.anthropic) return MODELS.facilitator;
-  if (apiKeys.gemini) return MODELS.facilitatorGemini;
-  return MODELS.facilitator;
 }
 
 export interface AttachedFile {
@@ -56,7 +31,6 @@ export interface Persona {
   organization: string; // "אגף טכנולוגיות, משרד התחבורה"
   color: string; // hex, לצבע האווטאר
   prompt: string; // הפרומט המלא בעברית — ניתן לעריכה מלאה
-  model: string; // ברירת מחדל 'claude-sonnet-5'
   webAccess: boolean; // האם יכולה לחפש ברשת תוך כדי הפגישה
   maxApiCalls: number; // תקציב קריאות מודל לפגישה אחת (1-20)
   maxWebSearches: number; // max_uses לכלי החיפוש (0-10)
@@ -120,6 +94,7 @@ export interface Meeting {
   meetingTypeIds: string[]; // לפחות אחד
   objective: string; // טקסט חופשי: מה רוצים להשיג / מה בונים
   participantIds: string[]; // לפחות 2
+  model: AvailableModel; // המודל שישמש את כל המשתתפים והמנחה בפגישה זו
   files: AttachedFile[]; // קבצי רקע משותפים
   discussionRounds: number; // 1-4, ברירת מחדל 2
   status: MeetingStatus;
