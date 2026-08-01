@@ -8,14 +8,15 @@ import {
   personasApi,
   runMeeting,
 } from '@/lib/api-client';
-import { downloadMeetingJson, downloadMeetingMarkdown } from '@/lib/export';
-import type {
-  Meeting,
-  MeetingPhase,
-  MeetingResult,
-  MeetingTask,
-  Persona,
-  TranscriptEntry,
+import { downloadMeetingDocx, downloadMeetingJson, downloadMeetingMarkdown } from '@/lib/export';
+import {
+  UNASSIGNED_TASK_OWNER_FALLBACK,
+  type Meeting,
+  type MeetingPhase,
+  type MeetingResult,
+  type MeetingTask,
+  type Persona,
+  type TranscriptEntry,
 } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -239,7 +240,7 @@ function ResultTabs({ result }: { result: MeetingResult }) {
   const groupedTasks = useMemo(() => {
     const map = new Map<string, MeetingTask[]>();
     for (const task of result.tasks) {
-      const key = task.ownerName || 'לא שויך';
+      const key = task.ownerName || UNASSIGNED_TASK_OWNER_FALLBACK;
       map.set(key, [...(map.get(key) ?? []), task]);
     }
     return Array.from(map.entries());
@@ -382,6 +383,11 @@ function MeetingRunInner({ id }: { id: string }) {
   const hasStartedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks whether this tab actually watched the meeting run (as opposed to
+  // just opening the results page of a meeting that finished long ago), so
+  // the DOCX auto-download below fires exactly once per completed run.
+  const wasLiveRef = useRef(false);
+  const autoDownloadedRef = useRef(false);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -540,6 +546,25 @@ function MeetingRunInner({ id }: { id: string }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [status]);
 
+  useEffect(() => {
+    if (status === 'running' || status === 'draft') {
+      wasLiveRef.current = true;
+    }
+  }, [status]);
+
+  // Downloads the DOCX summary automatically the moment a meeting this tab
+  // was watching finishes running — not on every visit to an already-
+  // completed meeting's page (guarded by wasLiveRef/autoDownloadedRef above).
+  useEffect(() => {
+    if (status !== 'completed' || !meeting || !result || !wasLiveRef.current || autoDownloadedRef.current) return;
+    autoDownloadedRef.current = true;
+    downloadMeetingDocx({ ...meeting, transcript, usage: usage ?? meeting.usage, result, status: 'completed' }).catch(
+      (err) => {
+        console.error('הורדת סיכום הפגישה (DOCX) נכשלה', err);
+      }
+    );
+  }, [status, result, meeting, transcript, usage]);
+
   const personaById = useMemo(() => {
     const map = new Map<string, Persona>();
     for (const p of personas ?? []) map.set(p.id, p);
@@ -606,6 +631,14 @@ function MeetingRunInner({ id }: { id: string }) {
           )}
           {(status === 'completed' || status === 'failed' || status === 'cancelled') && (
             <>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  downloadMeetingDocx(meeting).catch((err) => console.error('ייצוא DOCX נכשל', err));
+                }}
+              >
+                ייצוא DOCX
+              </Button>
               <Button variant="secondary" onClick={() => downloadMeetingMarkdown(meeting)}>
                 ייצוא Markdown
               </Button>

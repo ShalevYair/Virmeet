@@ -51,6 +51,11 @@ export interface MeetingType {
   updatedAt: string;
 }
 
+// When the model can't tie a task to a specific participant, the engine
+// (runner.ts) assigns it to the project manager instead of leaving it
+// ownerless — see public/seed/personas/project-manager.json.
+export const UNASSIGNED_TASK_OWNER_FALLBACK = 'מנהל פרויקט';
+
 export type MeetingPhase = 'prep' | 'opening' | 'discussion' | 'convergence' | 'extraction';
 export type MeetingStatus = 'draft' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -71,7 +76,7 @@ export interface MeetingTask {
   title: string;
   description: string;
   ownerPersonaId: string | null;
-  ownerName: string; // "לא שויך" אם null
+  ownerName: string; // "מנהל פרויקט" כברירת מחדל כשלא היה בעלים ברור מהדיון
   priority: 'high' | 'medium' | 'low';
   dependsOn: string[]; // כותרות/מזהים של משימות אחרות
   assumption: string; // ההנחה שעליה המשימה נשענת
