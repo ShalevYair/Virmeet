@@ -12,6 +12,7 @@ import {
   OrgSettings,
   Persona,
   TranscriptEntry,
+  UNASSIGNED_TASK_OWNER_FALLBACK,
 } from '../types';
 import { callModel as realCallModel } from '../gemini';
 import { CallModelResult } from '../llm-types';
@@ -35,6 +36,19 @@ const defaultDeps: RunMeetingDeps = {
   getMeetingTypes: storeListMeetingTypes,
   getOrgSettings: storeGetOrgSettings,
 };
+
+// The model reports ownerName as UNASSIGNED_OWNER_NAME when it can't tie a
+// task to a specific participant (see EXTRACTION_SCHEMA / the extraction
+// prompt). Rather than shipping a task with no owner, we hand it to the
+// project manager (UNASSIGNED_TASK_OWNER_FALLBACK) — the seed persona whose
+// whole job is exactly this ("משימה שאין לה בעלים ברור").
+const UNASSIGNED_OWNER_NAME = 'לא שויך';
+
+/** Resolves a task's raw owner name to who it should actually be assigned to, falling back to the project manager when the model reports no clear owner. */
+export function resolveTaskOwnerName(rawOwnerName: string): string {
+  const trimmed = rawOwnerName.trim();
+  return trimmed === '' || trimmed === UNASSIGNED_OWNER_NAME ? UNASSIGNED_TASK_OWNER_FALLBACK : trimmed;
+}
 
 const REGULAR_MAX_TOKENS = 8000;
 // The extraction call is the only one that must emit the entire
@@ -531,17 +545,20 @@ export async function runMeeting(
       conflicts: raw.conflicts,
       risks: raw.risks,
       modelAssumptions: raw.modelAssumptions,
-      tasks: raw.tasks.map((t) => ({
-        id: crypto.randomUUID(),
-        title: t.title,
-        description: t.description,
-        ownerPersonaId: personaIdByName.get(t.ownerName) ?? null,
-        ownerName: t.ownerName,
-        priority: t.priority,
-        dependsOn: t.dependsOn,
-        assumption: t.assumption,
-        riskIfAssumptionWrong: t.riskIfAssumptionWrong,
-      })),
+      tasks: raw.tasks.map((t) => {
+        const ownerName = resolveTaskOwnerName(t.ownerName);
+        return {
+          id: crypto.randomUUID(),
+          title: t.title,
+          description: t.description,
+          ownerPersonaId: personaIdByName.get(ownerName) ?? null,
+          ownerName,
+          priority: t.priority,
+          dependsOn: t.dependsOn,
+          assumption: t.assumption,
+          riskIfAssumptionWrong: t.riskIfAssumptionWrong,
+        };
+      }),
     };
 
     await persist({ status: 'completed', result: finalResult, completedAt: nowIso(), error: null });

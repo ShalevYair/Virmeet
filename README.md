@@ -126,6 +126,8 @@ Pro (הכי חזק), Gemini Flash (מאוזן, ברירת מחדל), Gemini Flas
   תשובה מוצלחת, לא כישלון. בלי ההיתר הזה מתקבל מסמך יפה ומופרך.
 - כל משימה נושאת את **ההנחה שעליה היא נשענת** ואת **מה קורה אם ההנחה שגויה**,
   וכל מה שהמודל השלים בעצמו מרוכז בשדה נפרד (`modelAssumptions`).
+- משימה שהמודל לא הצליח לשייך לבעלים ברור מהדיון משויכת אוטומטית ל**מנהל
+  הפרויקט**, ולא נשארת ללא בעלים (`resolveTaskOwnerName` ב-`engine/runner.ts`).
 
 ### עמידות
 
@@ -155,7 +157,7 @@ src/
     extract.ts           חילוץ טקסט בדפדפן (pdf.js + mammoth browser build)
     seed-loader.ts        טוען public/seed/ ל-IndexedDB, upsert-בלבד (לא דורס עריכות)
     persona-io.ts         ייצוא/ייבוא פרסונה ל/מ-JSON
-    export.ts             רינדור Markdown + הורדת קובץ בדפדפן
+    export.ts             רינדור Markdown/DOCX + הורדת קובץ בדפדפן (DOCX יורד אוטומטית כשפגישה מסתיימת)
     base-path.ts           seedUrl() — כל fetch לקובץ ב-public/ עובר דרכו
 public/
   seed/                  פרסונות, סוגי פגישות, הגדרות ארגון וקבצי רקע כ-JSON (ראו למטה)
