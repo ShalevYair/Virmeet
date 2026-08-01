@@ -18,7 +18,7 @@ export async function POST(req: Request, { params }: RouteContext) {
 
   // Personal key pasted into Settings (client component) and sent only on
   // this request — never logged, never persisted (see runMeeting/store).
-  const clientApiKey = req.headers.get('x-anthropic-api-key') || undefined;
+  const clientApiKey = req.headers.get('x-gemini-api-key') || undefined;
 
   const apiKeyError = requireApiKey(clientApiKey);
   if (apiKeyError) return apiKeyError;

@@ -14,8 +14,7 @@ import {
   Persona,
   TranscriptEntry,
 } from '../types';
-import { MODELS } from '../types';
-import { callModel as realCallModel, CallModelResult } from '../anthropic';
+import { callModel as realCallModel, CallModelResult } from '../gemini';
 import {
   getMeeting as storeGetMeeting,
   getOrgSettings as storeGetOrgSettings,
@@ -75,11 +74,11 @@ function makeEntry(
  * this promise settles.
  *
  * `overrideDeps` exists purely for tests: production callers should invoke
- * `runMeeting(meetingId, onEvent)` and let it use the real store + Anthropic
+ * `runMeeting(meetingId, onEvent)` and let it use the real store + Gemini
  * client.
  *
  * `apiKey` — when the run route received one from the browser's
- * x-anthropic-api-key header — is forwarded to every model call below and
+ * x-gemini-api-key header — is forwarded to every model call below and
  * nowhere else: it is never added to `meeting`, `transcript`, or any
  * persisted patch, so it can't reach data/ or the exported transcript.
  */
@@ -165,7 +164,7 @@ export async function runMeeting(
       recordApiCall();
       try {
         const result = await deps.callModel({
-          model: persona.model,
+          model: meeting.model,
           system: prompts.buildPersonaSystemBlocks(org, persona),
           messages: [{ role: 'user', content: prompts.buildPrepUserMessage(meeting, meetingTypes) }],
           maxTokens: REGULAR_MAX_TOKENS,
@@ -233,7 +232,7 @@ export async function runMeeting(
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: MODELS.facilitator,
+        model: meeting.model,
         system: prompts.buildFacilitatorSystemBlocks(org),
         messages: [
           {
@@ -306,7 +305,7 @@ export async function runMeeting(
       recordApiCall();
       try {
         const result = await deps.callModel({
-          model: persona.model,
+          model: meeting.model,
           system: prompts.buildPersonaSystemBlocks(org, persona),
           messages: [
             {
@@ -364,7 +363,7 @@ export async function runMeeting(
     recordApiCall();
     try {
       const result = await deps.callModel({
-        model: MODELS.facilitator,
+        model: meeting.model,
         system: prompts.buildFacilitatorSystemBlocks(org),
         messages: [
           { role: 'user', content: prompts.buildConvergenceUserMessage(meeting, meetingTypes, transcript) },
@@ -404,7 +403,7 @@ export async function runMeeting(
   try {
     recordApiCall();
     const result = await deps.callModel({
-      model: MODELS.facilitator,
+      model: meeting.model,
       system: prompts.buildFacilitatorSystemBlocks(org),
       messages: [
         {

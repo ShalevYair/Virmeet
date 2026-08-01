@@ -1,11 +1,12 @@
 // Virmeet — data model (spec §0-1). Do not change model IDs or add date suffixes.
 
-export const MODELS = {
-  persona: 'claude-sonnet-5', // ברירת מחדל לפרסונה
-  facilitator: 'claude-opus-5', // מנחה + חילוץ משימות
-} as const;
+// Google's rolling tier aliases — each always points at Google's current best
+// model in that tier, so this list never needs updating as Gemini versions
+// come and go. One of these is chosen per meeting (spec §4) and used for
+// every call in that meeting run, both facilitator and personas.
+export const AVAILABLE_MODELS = ['gemini-pro-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest'] as const;
 
-export const AVAILABLE_MODELS = ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'] as const;
+export const DEFAULT_MODEL: AvailableModel = 'gemini-flash-latest';
 
 export type AvailableModel = (typeof AVAILABLE_MODELS)[number];
 
@@ -27,7 +28,6 @@ export interface Persona {
   organization: string; // "אגף טכנולוגיות, משרד התחבורה"
   color: string; // hex, לצבע האווטאר
   prompt: string; // הפרומט המלא בעברית — ניתן לעריכה מלאה
-  model: string; // ברירת מחדל 'claude-sonnet-5'
   webAccess: boolean; // האם יכולה לחפש ברשת תוך כדי הפגישה
   maxApiCalls: number; // תקציב קריאות מודל לפגישה אחת (1-20)
   maxWebSearches: number; // max_uses לכלי החיפוש (0-10)
@@ -91,6 +91,7 @@ export interface Meeting {
   meetingTypeIds: string[]; // לפחות אחד
   objective: string; // טקסט חופשי: מה רוצים להשיג / מה בונים
   participantIds: string[]; // לפחות 2
+  model: AvailableModel; // המודל שישמש את כל המשתתפים והמנחה בפגישה זו
   files: AttachedFile[]; // קבצי רקע משותפים
   discussionRounds: number; // 1-4, ברירת מחדל 2
   status: MeetingStatus;

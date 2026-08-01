@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { use, useEffect, useState } from 'react';
 import { ApiError, personasApi } from '@/lib/api-client';
-import { AVAILABLE_MODELS, type Persona } from '@/lib/types';
+import type { Persona } from '@/lib/types';
 import {
   Button,
   Card,
@@ -71,7 +71,6 @@ export default function PersonaEditorPage({ params }: { params: Promise<{ id: st
         organization: persona.organization,
         color: persona.color,
         prompt: persona.prompt,
-        model: persona.model,
         webAccess: persona.webAccess,
         maxApiCalls: persona.maxApiCalls,
         maxWebSearches: persona.maxWebSearches,
@@ -235,21 +234,8 @@ export default function PersonaEditorPage({ params }: { params: Promise<{ id: st
       </Card>
 
       <Card className="flex flex-col gap-4 p-5">
-        <h2 className="text-sm font-semibold">מודל ותקציב</h2>
+        <h2 className="text-sm font-semibold">תקציב</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="מודל">
-            <select
-              className={inputClasses}
-              value={persona.model}
-              onChange={(e) => update('model', e.target.value)}
-            >
-              {AVAILABLE_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </Field>
           <Field label="מקסימום קריאות API לפגישה" hint="תקציב קריאות מודל לפרסונה זו, לפגישה אחת (1-20)">
             <input
               type="number"

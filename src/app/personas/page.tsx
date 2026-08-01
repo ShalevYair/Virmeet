@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ApiError, personasApi } from '@/lib/api-client';
-import { MODELS, type Persona } from '@/lib/types';
+import type { Persona } from '@/lib/types';
 import { Badge, Button, Card, EmptyState, ErrorBanner, Skeleton } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 
@@ -40,7 +40,6 @@ export default function PersonasPage() {
         organization: '',
         color: randomColor(personas?.length ?? 0),
         prompt: '',
-        model: MODELS.persona,
         webAccess: false,
         maxApiCalls: 8,
         maxWebSearches: 3,
@@ -59,7 +58,7 @@ export default function PersonasPage() {
         <div>
           <h1 className="text-2xl font-semibold">משתתפים</h1>
           <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-            הפרסונות שישתתפו בסימולציות הפגישה — לכל אחת פרומפט, מודל ותקציב משלה.
+            הפרסונות שישתתפו בסימולציות הפגישה — לכל אחת פרומפט ותקציב משלה. המודל נבחר בעת יצירת כל פגישה.
           </p>
         </div>
         <Button variant="primary" onClick={handleCreate} disabled={creating}>
@@ -103,7 +102,6 @@ export default function PersonasPage() {
                 <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
                   {!p.isActive && <Badge tone="neutral">לא פעיל</Badge>}
                   {p.webAccess && <Badge tone="info">גישה לאינטרנט</Badge>}
-                  <Badge tone="neutral">{p.model}</Badge>
                 </div>
               </Card>
             </Link>

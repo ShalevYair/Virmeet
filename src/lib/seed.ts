@@ -4,7 +4,6 @@
 
 import { randomUUID } from 'crypto';
 import { MeetingType, OrgSettings, Persona } from './types';
-import { MODELS } from './types';
 
 export function seedOrgSettings(): OrgSettings {
   return {
@@ -68,7 +67,6 @@ ${style}`;
 export function seedPersonas(): Persona[] {
   const now = new Date(0).toISOString();
   const base = {
-    model: MODELS.persona,
     webAccess: false,
     maxApiCalls: 8,
     maxWebSearches: 3,

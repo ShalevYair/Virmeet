@@ -3,10 +3,16 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, healthApi, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-client';
-import type { MeetingType, Persona } from '@/lib/types';
+import { AVAILABLE_MODELS, DEFAULT_MODEL, type AvailableModel, type MeetingType, type Persona } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
 import { getStoredApiKey } from '@/lib/api-key';
+
+const MODEL_LABELS: Record<AvailableModel, { title: string; hint: string }> = {
+  'gemini-pro-latest': { title: 'Gemini Pro', hint: 'הכי חזק — לדיונים מורכבים שדורשים איכות מקסימלית' },
+  'gemini-flash-latest': { title: 'Gemini Flash', hint: 'מאוזן — מהירות וידה מול איכות (ברירת מחדל)' },
+  'gemini-flash-lite-latest': { title: 'Gemini Flash-Lite', hint: 'הכי מהיר וזול — לפגישות עם הרבה משתתפים/סבבים' },
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} בייט`;
@@ -25,6 +31,7 @@ export default function NewMeetingPage() {
   const [selectedTypeIds, setSelectedTypeIds] = useState<string[]>([]);
   const [objective, setObjective] = useState('');
   const [participantIds, setParticipantIds] = useState<string[]>([]);
+  const [model, setModel] = useState<AvailableModel>(DEFAULT_MODEL);
   const [discussionRounds, setDiscussionRounds] = useState(2);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -93,6 +100,7 @@ export default function NewMeetingPage() {
         meetingTypeIds: selectedTypeIds,
         objective,
         participantIds,
+        model,
         discussionRounds,
       });
       for (const file of stagedFiles) {
@@ -293,6 +301,34 @@ export default function NewMeetingPage() {
       </Card>
 
       <Card className="flex flex-col gap-3 p-5">
+        <h2 className="text-sm font-semibold">מודל</h2>
+        <p className="text-xs text-black/50 dark:text-white/50">
+          המודל שישמש את כל המשתתפים והמנחה בפגישה הזו.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {AVAILABLE_MODELS.map((m) => {
+            const selected = model === m;
+            const label = MODEL_LABELS[m];
+            return (
+              <button key={m} type="button" onClick={() => setModel(m)} className="text-right">
+                <Card
+                  className={`flex h-full flex-col gap-1 p-4 transition-shadow hover:shadow-md ${
+                    selected ? 'ring-2 ring-blue-500' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">{label.title}</p>
+                    {selected && <Badge tone="info">נבחר</Badge>}
+                  </div>
+                  <p className="text-sm text-black/60 dark:text-white/60">{label.hint}</p>
+                </Card>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-5">
         <h2 className="text-sm font-semibold">מספר סבבי דיון</h2>
         <div className="flex gap-2">
           {[1, 2, 3, 4].map((n) => (
@@ -315,7 +351,7 @@ export default function NewMeetingPage() {
       {missingApiKey && (
         <ErrorBanner
           message={
-            'לא נמצא מפתח API של Anthropic — לא בשרת ולא בדפדפן הזה. הריצה תיכשל. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה.'
+            'לא נמצא מפתח API של Gemini — לא בשרת ולא בדפדפן הזה. הריצה תיכשל. יש להגדיר מפתח במסך ההגדרות לפני התחלת הפגישה.'
           }
         />
       )}

@@ -1,8 +1,8 @@
 'use client';
 
-// Virmeet — lets a user paste a personal Anthropic API key, stored only in
+// Virmeet — lets a user paste a personal Gemini API key, stored only in
 // this browser's localStorage. Never sent anywhere except as the
-// x-anthropic-api-key header on POST /api/meetings/[id]/run (see api-client.ts).
+// x-gemini-api-key header on POST /api/meetings/[id]/run (see api-client.ts).
 
 import { useEffect, useState } from 'react';
 import { clearStoredApiKey, getStoredApiKey, maskApiKey, setStoredApiKey } from '@/lib/api-key';
@@ -20,7 +20,7 @@ export function ApiKeySettings() {
   }, []);
 
   const trimmedDraft = draft.trim();
-  const shapeWarning = trimmedDraft.length > 0 && !trimmedDraft.startsWith('sk-ant-');
+  const shapeWarning = trimmedDraft.length > 0 && !trimmedDraft.startsWith('AIza');
 
   function handleSave() {
     if (!trimmedDraft) return;
@@ -42,7 +42,7 @@ export function ApiKeySettings() {
   return (
     <Card className="flex flex-col gap-4 p-5">
       <div>
-        <h2 className="text-sm font-semibold">מפתח API אישי של Anthropic</h2>
+        <h2 className="text-sm font-semibold">מפתח API אישי של Gemini</h2>
         <p className="mt-1 text-sm text-black/60 dark:text-white/60">
           {storedKey
             ? `מפתח שמור בדפדפן זה (${maskApiKey(storedKey)}). הוא ישמש להרצת פגישות מהמכשיר הזה.`
@@ -50,7 +50,7 @@ export function ApiKeySettings() {
         </p>
       </div>
 
-      <Field label="הדבקת מפתח חדש" hint='מפתחות של Anthropic מתחילים ב-"sk-ant-"'>
+      <Field label="הדבקת מפתח חדש" hint='מפתחות של Gemini מתחילים בדרך כלל ב-"AIza"'>
         <div className="flex gap-2">
           <input
             type={visible ? 'text' : 'password'}
@@ -62,7 +62,7 @@ export function ApiKeySettings() {
               setSaved(false);
               setCleared(false);
             }}
-            placeholder="sk-ant-..."
+            placeholder="AIza..."
             autoComplete="off"
             spellCheck={false}
           />
@@ -72,14 +72,14 @@ export function ApiKeySettings() {
         </div>
         {shapeWarning && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            שימו לב: המפתח לא נראה כמפתח Anthropic תקין (אמור להתחיל ב-&quot;sk-ant-&quot;). ניתן לשמור בכל זאת.
+            שימו לב: המפתח לא נראה כמפתח Gemini תקין (אמור להתחיל ב-&quot;AIza&quot;). ניתן לשמור בכל זאת.
           </p>
         )}
       </Field>
 
       <p className="text-xs text-black/50 dark:text-white/50">
         המפתח נשמר רק ב-localStorage של הדפדפן, על המכשיר הזה בלבד — הוא לא נשלח לשום מקום מלבד לשרת של
-        Virmeet, ורק כדי להריץ פגישה בפועל מול ה-API של Anthropic. כל סקריפט שרץ בדף יכול לקרוא אותו, ולכן
+        Virmeet, ורק כדי להריץ פגישה בפועל מול ה-API של Gemini. כל סקריפט שרץ בדף יכול לקרוא אותו, ולכן
         זה מתאים לשימוש אישי במכשיר שלכם ולא למחשב משותף.
       </p>
 

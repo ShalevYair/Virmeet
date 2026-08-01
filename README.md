@@ -24,7 +24,7 @@
 
 ```bash
 npm install
-cp .env.example .env.local     # והזן ANTHROPIC_API_KEY
+cp .env.example .env.local     # והזן GEMINI_API_KEY
 npm run dev                    # http://localhost:3000
 ```
 
@@ -39,19 +39,27 @@ npm run build
 
 ---
 
-## מפתח ה-API של Anthropic
+## מפתח ה-API של Gemini
 
-יש שתי דרכים להזין מפתח, ואפשר להשתמש בכל אחת מהן בנפרד. הדרך הראשונה היא
-`ANTHROPIC_API_KEY` בקובץ `.env.local`, כמו למעלה — זה מפתח שרת-כלל, שרץ בצד
+הכלי מבוסס כולו על Gemini (`@google/genai`) — אין תלות בספק מודלים אחר. יש שתי
+דרכים להזין מפתח, ואפשר להשתמש בכל אחת מהן בנפרד. הדרך הראשונה היא
+`GEMINI_API_KEY` בקובץ `.env.local`, כמו למעלה — זה מפתח שרת-כלל, שרץ בצד
 השרת ותקף לכל מי שמריץ פגישה מול המופע הזה. הדרך השנייה היא להדביק מפתח אישי
 במסך ההגדרות (`/settings`); הוא נשמר ב-`localStorage` של הדפדפן ונשלח לשרת רק
-בבקשת ההרצה עצמה (`POST /api/meetings/[id]/run`, כותרת `x-anthropic-api-key`),
+בבקשת ההרצה עצמה (`POST /api/meetings/[id]/run`, כותרת `x-gemini-api-key`),
 בלי לגעת בדיסק, בתמליל, או בלוגים. אם קיימים שני המפתחות, המפתח מהדפדפן גובר.
 
 חשוב להבין את המשמעות של האופציה השנייה: `localStorage` נגיש לכל סקריפט שרץ
 בדף הזה, כך שהיא מתאימה למכשיר אישי שרק אתם משתמשים בו, ולא למופע חשוף לרשת או
-משותף בין כמה משתמשים — שם המפתח היחיד שאמור להיות מוגדר הוא `ANTHROPIC_API_KEY`
+משותף בין כמה משתמשים — שם המפתח היחיד שאמור להיות מוגדר הוא `GEMINI_API_KEY`
 בצד השרת.
+
+### בחירת מודל
+
+בעת יצירת פגישה חדשה בוחרים מודל אחד מבין שלוש רמות (`gemini-pro-latest`,
+`gemini-flash-latest`, `gemini-flash-lite-latest`) — כינויים מתגלגלים של Google
+שתמיד מצביעים על המודל העדכני ביותר בכל רמה. המודל הנבחר משמש את כל המשתתפים
+ואת המנחה באותה פגישה; אין הגדרת מודל נפרדת לכל פרסונה.
 
 ---
 
@@ -100,7 +108,7 @@ src/
   components/            רכיבי UI משותפים
   lib/
     engine/              מכונת המצבים: prompts, schemas, budget, runner
-    anthropic.ts         עטיפה לקריאת מודל: caching, retry, חיפוש רשת, refusal
+    gemini.ts            עטיפה לקריאת מודל: retry, חיפוש רשת, refusal
     store.ts             אחסון קבצי JSON עם כתיבה אטומית ונעילה per-file
     extract.ts           חילוץ טקסט מקבצים
     seed.ts              נתוני ברירת מחדל

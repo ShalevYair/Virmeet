@@ -4,6 +4,7 @@
 
 import type {
   AttachedFile,
+  AvailableModel,
   Meeting,
   MeetingPhase,
   MeetingResult,
@@ -88,7 +89,6 @@ export type PersonaInput = {
   organization: string;
   color: string;
   prompt: string;
-  model: string;
   webAccess: boolean;
   maxApiCalls: number;
   maxWebSearches: number;
@@ -156,6 +156,7 @@ export type MeetingCreateInput = {
   meetingTypeIds: string[];
   objective: string;
   participantIds: string[];
+  model: AvailableModel;
   discussionRounds?: number;
 };
 
@@ -217,7 +218,7 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
     res = await fetch(`/api/meetings/${id}/run`, {
       method: 'POST',
       signal: handlers.signal,
-      headers: storedKey ? { 'x-anthropic-api-key': storedKey } : undefined,
+      headers: storedKey ? { 'x-gemini-api-key': storedKey } : undefined,
     });
   } catch {
     handlers.onError?.('לא ניתן היה להתחיל את הפגישה — בדקו את החיבור לשרת.');

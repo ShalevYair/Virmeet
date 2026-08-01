@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import {
   AttachedFile,
+  AvailableModel,
   Meeting,
   MeetingStatus,
   MeetingType,
@@ -151,7 +152,6 @@ export type PersonaInput = {
   organization: string;
   color: string;
   prompt: string;
-  model: string;
   webAccess: boolean;
   maxApiCalls: number;
   maxWebSearches: number;
@@ -177,7 +177,6 @@ export async function createPersona(input: PersonaInput): Promise<Persona> {
       organization: input.organization,
       color: input.color,
       prompt: input.prompt,
-      model: input.model,
       webAccess: input.webAccess,
       maxApiCalls: input.maxApiCalls,
       maxWebSearches: input.maxWebSearches,
@@ -333,6 +332,7 @@ export type MeetingCreateInput = {
   meetingTypeIds: string[];
   objective: string;
   participantIds: string[];
+  model: AvailableModel;
   files?: AttachedFile[];
   discussionRounds?: number;
 };
@@ -380,6 +380,7 @@ export async function createMeeting(input: MeetingCreateInput): Promise<Meeting>
     meetingTypeIds: input.meetingTypeIds,
     objective: input.objective,
     participantIds: input.participantIds,
+    model: input.model,
     files: input.files ?? [],
     discussionRounds: input.discussionRounds ?? 2,
     status: 'draft' as MeetingStatus,

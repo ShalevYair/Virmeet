@@ -4,12 +4,12 @@
 // [orgBlock, personaPrompt, personaFilesBlock] and none of those three change
 // during a meeting run — only the `messages` (user turn) content changes
 // between prep/opening/discussion calls. That stability is what lets
-// prompt caching (cache_control on the last system block) actually hit across
-// a persona's repeated calls in the same meeting. Do not fold per-phase or
-// per-round content into the system blocks.
+// Gemini's implicit context caching actually hit across a persona's repeated
+// calls in the same meeting. Do not fold per-phase or per-round content into
+// the system blocks.
 
 import { Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
-import { SystemBlock } from '../anthropic';
+import { SystemBlock } from '../gemini';
 import { OpeningOutput, PrepOutput } from './types';
 
 const PHASE_LABELS_HE: Record<TranscriptEntry['phase'], string> = {

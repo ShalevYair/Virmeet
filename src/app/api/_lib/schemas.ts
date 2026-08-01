@@ -1,6 +1,9 @@
 // Virmeet — zod request-body schemas for the API routes (spec §5).
 
 import { z } from 'zod';
+import { AVAILABLE_MODELS } from '@/lib/types';
+
+const modelSchema = z.enum(AVAILABLE_MODELS);
 
 export const personaCreateSchema = z.object({
   name: z.string().min(1),
@@ -8,7 +11,6 @@ export const personaCreateSchema = z.object({
   organization: z.string().min(1),
   color: z.string().min(1),
   prompt: z.string().min(1),
-  model: z.string().min(1),
   webAccess: z.boolean(),
   maxApiCalls: z.number().int().min(1).max(20),
   maxWebSearches: z.number().int().min(0).max(10),
@@ -38,6 +40,7 @@ export const meetingCreateSchema = z.object({
   meetingTypeIds: z.array(z.string().min(1)).min(1),
   objective: z.string().min(1),
   participantIds: z.array(z.string().min(1)).min(2),
+  model: modelSchema,
   discussionRounds: z.number().int().min(1).max(4).optional(),
 });
 
@@ -50,6 +53,7 @@ export const meetingUpdateSchema = z
     objective: z.string().min(1),
     meetingTypeIds: z.array(z.string().min(1)).min(1),
     participantIds: z.array(z.string().min(1)).min(2),
+    model: modelSchema,
     discussionRounds: z.number().int().min(1).max(4),
     status: z.enum(['draft', 'cancelled']),
   })
