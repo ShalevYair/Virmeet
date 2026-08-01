@@ -152,6 +152,16 @@ export async function setPersonaFiles(id: string, files: AttachedFile[]): Promis
   return updated;
 }
 
+/** Persist a persona's resolved Drive knowledge-folder id (see drive.ts#ensurePersonaFolder). */
+export async function setPersonaDriveFolderId(id: string, driveFolderId: string): Promise<Persona | null> {
+  const db = await getDb();
+  const current: Persona | undefined = await db.get('personas', id);
+  if (!current) return null;
+  const updated: Persona = { ...current, driveFolderId, updatedAt: nowIso() };
+  await db.put('personas', updated);
+  return updated;
+}
+
 /** Writes a persona verbatim (used only by seed-loader.ts, which supplies its own stable id). */
 export async function putPersonaRaw(persona: Persona): Promise<void> {
   const db = await getDb();
@@ -247,6 +257,20 @@ export async function updateOrgSettings(
   const updated: OrgSettings = { ...current, ...patch, updatedAt: nowIso() };
   await setKv('orgSettings', updated);
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Drive root folder id — a single cached value under the kv store, so
+// settings.ts (DriveSettings) doesn't have to re-search Drive by name on
+// every visit. See drive.ts#ensureVirmeetRootFolder.
+// ---------------------------------------------------------------------------
+
+export async function getDriveRootFolderId(): Promise<string | undefined> {
+  return getKv<string>('driveRootFolderId');
+}
+
+export async function setDriveRootFolderId(id: string): Promise<void> {
+  await setKv('driveRootFolderId', id);
 }
 
 // ---------------------------------------------------------------------------

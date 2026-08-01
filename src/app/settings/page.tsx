@@ -6,6 +6,7 @@ import { ensureSeedLoaded } from '@/lib/seed-loader';
 import type { OrgSettings } from '@/lib/types';
 import { Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { ApiKeySettings } from '@/components/ApiKeySettings';
+import { DriveSettings } from '@/components/DriveSettings';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 export default function SettingsPage() {
@@ -85,6 +86,8 @@ export default function SettingsPage() {
       {error && <ErrorBanner message={error} onRetry={load} />}
 
       <ApiKeySettings />
+
+      <DriveSettings />
 
       <Card className="flex flex-col gap-3 p-5">
         <h2 className="text-sm font-semibold">פרסונות וסוגי פגישות מהריפו</h2>

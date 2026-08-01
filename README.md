@@ -104,6 +104,33 @@ Pro (הכי חזק), Gemini Flash (מאוזן, ברירת מחדל), Gemini Flas
 
 ---
 
+## חיבור ל-Google Drive — ידע לפרסונות (אופציונלי)
+
+במסך ההגדרות (`/settings/`) אפשר לחבר תיקיית Google Drive שממנה כל פרסונה
+שואבת קבצי רקע פרטיים משלה, בנוסף לקבצים שמעלים ידנית. אותו מודל אמון כמו
+מפתח ה-Gemini — OAuth כולו בדפדפן (Google Identity Services), בלי שרת:
+
+- **Client ID** (לא סוד — מזהה ציבורי) נוצר ב-Google Cloud Console ונשמר
+  ב-`localStorage`, בדיוק כמו מפתח ה-Gemini.
+- **אסימון הגישה עצמו נשמר בזיכרון בלבד** (לא ב-`localStorage`) — קצר-טווח
+  (כשעה), נעלם בסגירת/רענון הלשונית, ודורש התחברות מחדש בכל פעם.
+- הכפתור "צור/רענן מבנה תיקיות" יוצר `VIRMEET/<שם הפרסונה>/` לכל פרסונה
+  פעילה — לתוך התיקיות האלה גוררים ידנית קבצי רקע דרך Drive עצמו.
+- ה-scope המבוקש הוא **גישה מלאה ל-Drive** (`.../auth/drive`), לא ה-scope
+  המצומצם `drive.file` — כי המנגנון צריך לראות קבצים שנוספו ידנית דרך
+  Drive, לא רק קבצים שהאתר עצמו יצר. המשמעות: מסך ה-consent ב-Google Cloud
+  יכול להישאר במצב "Testing" הבלתי-מאומת (מתאים לכלי אישי, ראו "מודל האמון"
+  למעלה) — אין צורך בתהליך אימות/בדיקת אבטחה מול Google כל עוד זה שימוש
+  אישי.
+- שלב זה (חיבור + יצירת תיקיות) הוא הבסיס בלבד: אינדוקס הקבצים בתחילת פגישה
+  והזרקתם לפרסונות הם שלבים נפרדים, טרם מומשו.
+
+קוד: `src/lib/drive.ts` (קריאות REST ל-Drive v3), `src/lib/drive-auth.ts`
+(טעינת GIS + זרימת ה-OAuth), `src/lib/drive-session.ts` (החזקת האסימון
+בזיכרון), `src/components/DriveSettings.tsx` (הממשק).
+
+---
+
 ## מכונת המצבים של הפגישה
 
 הפגישה אינה round-robin חופשי. היא מכונת מצבים דטרמיניסטית, וה-LLM פועל רק
@@ -158,6 +185,9 @@ src/
     seed-loader.ts        טוען public/seed/ ל-IndexedDB, upsert-בלבד (לא דורס עריכות)
     persona-io.ts         ייצוא/ייבוא פרסונה ל/מ-JSON
     export.ts             רינדור Markdown/DOCX + הורדת קובץ בדפדפן (DOCX יורד אוטומטית כשפגישה מסתיימת)
+    drive.ts              קריאות REST ל-Google Drive v3 (יצירת/איתור תיקיות)
+    drive-auth.ts          זרימת OAuth מול Drive (Google Identity Services, בדפדפן בלבד)
+    drive-session.ts       אסימון הגישה ל-Drive — בזיכרון בלבד, לא ב-localStorage
     base-path.ts           seedUrl() — כל fetch לקובץ ב-public/ עובר דרכו
 public/
   seed/                  פרסונות, סוגי פגישות, הגדרות ארגון וקבצי רקע כ-JSON (ראו למטה)
