@@ -129,6 +129,8 @@ export const personasApi = {
       const nextFiles = persona.files.filter((f) => f.id !== fileId);
       await store.setPersonaFiles(id, nextFiles);
     }),
+  setDriveFolderId: (id: string, driveFolderId: string) =>
+    run(async () => (await store.setPersonaDriveFolderId(id, driveFolderId)) ?? notFound('המשתתף לא נמצא.')),
 };
 
 // ---------------------------------------------------------------------------
@@ -182,6 +184,16 @@ export const orgApi = {
       if (patch.constraints !== undefined) requireNonEmpty(patch.constraints, 'אילוצים');
       return store.updateOrgSettings(patch);
     }),
+};
+
+// ---------------------------------------------------------------------------
+// Drive root folder id — cached lookup so Settings doesn't re-search Drive
+// by name on every visit (see drive.ts#ensureVirmeetRootFolder).
+// ---------------------------------------------------------------------------
+
+export const driveApi = {
+  getRootFolderId: () => run(() => store.getDriveRootFolderId()),
+  setRootFolderId: (id: string) => run(() => store.setDriveRootFolderId(id)),
 };
 
 // ---------------------------------------------------------------------------

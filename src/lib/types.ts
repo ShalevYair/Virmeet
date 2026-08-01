@@ -35,6 +35,7 @@ export interface Persona {
   maxApiCalls: number; // תקציב קריאות מודל לפגישה אחת (1-20)
   maxWebSearches: number; // max_uses לכלי החיפוש (0-10)
   files: AttachedFile[]; // קבצי רקע פרטיים לפרסונה
+  driveFolderId?: string; // מזהה תיקיית הידע של הפרסונה ב-Drive (VIRMEET/<שם הפרסונה>/), אם חוברה
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
