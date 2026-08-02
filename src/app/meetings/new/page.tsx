@@ -270,12 +270,12 @@ export default function NewMeetingPage() {
             <path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <p className="text-sm font-medium">גררו קבצים לכאן או לחצו לבחירה</p>
-          <p className="text-xs text-black/50 dark:text-white/50">txt, md, csv, json, pdf, docx — עד 10MB לקובץ</p>
+          <p className="text-xs text-black/50 dark:text-white/50">txt, md, csv, json, pdf, docx, xlsx, pptx — עד 10MB לקובץ</p>
           <input
             id="shared-file-input"
             type="file"
             multiple
-            accept=".txt,.md,.csv,.json,.pdf,.docx"
+            accept=".txt,.md,.csv,.json,.pdf,.docx,.xlsx,.pptx"
             className="hidden"
             onChange={(e) => addFiles(e.target.files)}
           />
