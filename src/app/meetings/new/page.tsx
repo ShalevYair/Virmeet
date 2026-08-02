@@ -7,7 +7,10 @@ import { ApiError, meetingTypesApi, meetingsApi, personasApi } from '@/lib/api-c
 import { AVAILABLE_MODELS, DEFAULT_MODEL, type AvailableModel, type MeetingType, type Persona } from '@/lib/types';
 import { Badge, Button, Card, ErrorBanner, Field, Skeleton, inputClasses } from '@/components/ui';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { getStoredApiKey } from '@/lib/api-key';
+import { DRIVE_CLIENT_ID, requestDriveAccessToken } from '@/lib/drive-auth';
+import { isDriveConnected } from '@/lib/drive-session';
 
 const MODEL_LABELS: Record<AvailableModel, { title: string; hint: string }> = {
   'gemini-3.1-pro-preview': { title: 'Gemini Pro', hint: 'הכי חזק — לדיונים מורכבים שדורשים איכות מקסימלית' },
@@ -42,6 +45,10 @@ export default function NewMeetingPage() {
   const [touched, setTouched] = useState(false);
 
   const [hasGeminiKey, setHasGeminiKey] = useState(true);
+
+  const [driveCheckOpen, setDriveCheckOpen] = useState(false);
+  const [driveConnecting, setDriveConnecting] = useState(false);
+  const [driveConnectError, setDriveConnectError] = useState<string | null>(null);
 
   function load() {
     setLoadError(null);
@@ -82,9 +89,12 @@ export default function NewMeetingPage() {
   const participantsValid = participantIds.length >= 2;
   const formValid = typesValid && participantsValid;
 
-  async function handleStart() {
-    setTouched(true);
-    if (!formValid) return;
+  /** True if any selected participant has a Drive knowledge folder that would otherwise refresh silently-unused this run. */
+  function participantsExpectDrive(): boolean {
+    return participantIds.some((id) => (personas ?? []).find((p) => p.id === id)?.driveFolderId);
+  }
+
+  async function submitMeeting() {
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -104,6 +114,37 @@ export default function NewMeetingPage() {
       setSubmitError(err instanceof ApiError ? err.message : 'יצירת הפגישה נכשלה');
       setSubmitting(false);
     }
+  }
+
+  async function handleStart() {
+    setTouched(true);
+    if (!formValid) return;
+    if (participantsExpectDrive() && !isDriveConnected()) {
+      setDriveConnectError(null);
+      setDriveCheckOpen(true);
+      return;
+    }
+    await submitMeeting();
+  }
+
+  async function handleDriveConnectNow() {
+    setDriveConnecting(true);
+    setDriveConnectError(null);
+    try {
+      await requestDriveAccessToken(DRIVE_CLIENT_ID);
+      setDriveConnecting(false);
+      setDriveCheckOpen(false);
+      await submitMeeting();
+    } catch (err) {
+      setDriveConnecting(false);
+      setDriveConnectError(err instanceof Error ? err.message : 'ההתחברות ל-Drive נכשלה.');
+    }
+  }
+
+  function handleContinueWithoutDrive() {
+    if (driveConnecting) return;
+    setDriveCheckOpen(false);
+    void submitMeeting();
   }
 
   if (loadError) {
@@ -372,6 +413,29 @@ export default function NewMeetingPage() {
           </Button>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={driveCheckOpen}
+        title="אין חיבור פעיל ל-Drive"
+        description={
+          <>
+            <p>
+              למשתתפים שנבחרו יש תיקיית ידע מחוברת ב-Drive, אבל אין חיבור פעיל כרגע בטאב הזה (האסימון
+              פג, או שעדיין לא התחברתם). בלי חיבור — הפגישה תרוץ בלי הקבצים ששמורים שם, ותקבלו על כך
+              שורת מערכת בתמליל.
+            </p>
+            {driveConnectError && (
+              <p className="mt-2 text-red-600 dark:text-red-400">{driveConnectError}</p>
+            )}
+          </>
+        }
+        confirmLabel="התחבר עכשיו"
+        cancelLabel="המשך בלי Drive"
+        danger={false}
+        busy={driveConnecting}
+        onConfirm={() => void handleDriveConnectNow()}
+        onCancel={handleContinueWithoutDrive}
+      />
     </div>
   );
 }
