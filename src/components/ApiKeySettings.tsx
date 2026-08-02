@@ -72,33 +72,35 @@ export function ApiKeySettings() {
         </p>
       </div>
 
-      <Field label="הדבקת מפתח חדש" hint='מפתחות של Gemini מתחילים בדרך כלל ב-"AIza"'>
-        <div className="flex gap-2">
-          <input
-            type={visible ? 'text' : 'password'}
-            dir="ltr"
-            className={`${inputClasses} text-left`}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setSaved(false);
-              setCleared(false);
-              setTestResult(null);
-            }}
-            placeholder="AIza..."
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Button type="button" variant="ghost" onClick={() => setVisible((v) => !v)}>
-            {visible ? 'הסתר' : 'הצג'}
-          </Button>
-        </div>
-        {shapeWarning && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">
-            שימו לב: המפתח לא נראה כמפתח Gemini תקין. ניתן לשמור בכל זאת.
-          </p>
-        )}
-      </Field>
+      {!storedKey && (
+        <Field label="הדבקת מפתח חדש" hint='מפתחות של Gemini מתחילים בדרך כלל ב-"AIza"'>
+          <div className="flex gap-2">
+            <input
+              type={visible ? 'text' : 'password'}
+              dir="ltr"
+              className={`${inputClasses} text-left`}
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setSaved(false);
+                setCleared(false);
+                setTestResult(null);
+              }}
+              placeholder="AIza..."
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <Button type="button" variant="ghost" onClick={() => setVisible((v) => !v)}>
+              {visible ? 'הסתר' : 'הצג'}
+            </Button>
+          </div>
+          {shapeWarning && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              שימו לב: המפתח לא נראה כמפתח Gemini תקין. ניתן לשמור בכל זאת.
+            </p>
+          )}
+        </Field>
+      )}
 
       <div className="flex items-center justify-end gap-3 border-t border-black/10 pt-4 dark:border-white/10">
         {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400">נשמר ✓</span>}
@@ -122,12 +124,15 @@ export function ApiKeySettings() {
             'בדוק תקינות'
           )}
         </Button>
-        <Button variant="danger" onClick={handleClear} disabled={!storedKey}>
-          שכח מפתח
-        </Button>
-        <Button variant="primary" onClick={handleSave} disabled={!trimmedDraft}>
-          שמור
-        </Button>
+        {storedKey ? (
+          <Button variant="danger" onClick={handleClear}>
+            שכח מפתח
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={handleSave} disabled={!trimmedDraft}>
+            שמור
+          </Button>
+        )}
       </div>
 
       <p className="border-t border-black/10 pt-4 text-xs text-black/50 dark:border-white/10 dark:text-white/50">
