@@ -233,7 +233,7 @@ src/
     eval/                מדדי הערכה (למשל eval-attribution — ראו npm run eval:attribution)
     gemini.ts            עטיפת דפדפן ל-Gemini: callModel(), thinking, grounding, retry, refusal
     store.ts             אחסון ב-IndexedDB (idb) — אותן חתימות פונקציות כמו הגרסה הישנה מול דיסק
-    extract.ts           חילוץ טקסט בדפדפן (pdf.js + mammoth browser build)
+    extract.ts           חילוץ טקסט בדפדפן (pdf.js + mammoth + xlsx + jszip ל-pptx)
     seed-loader.ts        טוען public/seed/ ל-IndexedDB, upsert-בלבד (לא דורס עריכות)
     persona-io.ts         ייצוא/ייבוא פרסונה ל/מ-JSON
     export.ts             רינדור Markdown/DOCX + הורדת קובץ בדפדפן (DOCX יורד אוטומטית כשפגישה מסתיימת)
@@ -275,8 +275,11 @@ network hop. `runMeeting(id, handlers)` ב-`lib/api-client.ts` קורא למנו
 - **אין RAG.** קבצי הרקע נדחפים ישירות להקשר של הפרסונה. זה מכוון — retrieval
   מוסיף שכבת כשל שתסתיר את השאלה האמיתית, האם הפרסונות בכלל נשמעות שונה.
 - **אין זיכרון בין פגישות.** כל פגישה מתחילה מאפס.
-- חילוץ טקסט מ-PDF ומ-DOCX הוא best-effort; כשל בחילוץ מסומן על הקובץ ואינו
-  מפיל את ההעלאה.
+- חילוץ טקסט מ-PDF, DOCX, XLSX ו-PPTX הוא best-effort — כל אחד משוטח לטקסט
+  פשוט (PDF/DOCX דרך pdf.js/mammoth, XLSX ל-CSV לכל גיליון, PPTX לטקסט לכל
+  שקופית דרך פענוח ה-XML הפנימי) לפני שהוא נכנס לפרומפט; אין רינדור של
+  עיצוב, נוסחאות, תרשימים או תמונות. כשל בחילוץ מסומן על הקובץ ואינו מפיל את
+  ההעלאה.
 - **כיסוי בדיקות חלקי.** `npm test` (vitest) מכסה: תקציב קריאות (`budget`),
   ביטול כולל אות abort (`cancel`, `gemini`), טיפול
   בקטיעת תשובה (`truncation`), חישוב `usage` כולל `cacheWriteTokens`

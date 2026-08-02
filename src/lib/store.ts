@@ -13,7 +13,7 @@ const DB_NAME = 'virmeet';
 const DB_VERSION = 1;
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
-const ALLOWED_EXTENSIONS = ['.txt', '.md', '.csv', '.json', '.pdf', '.docx'];
+const ALLOWED_EXTENSIONS = ['.txt', '.md', '.csv', '.json', '.pdf', '.docx', '.xlsx', '.pptx'];
 
 const BLANK_ORG_SETTINGS: OrgSettings = {
   organizationName: '',

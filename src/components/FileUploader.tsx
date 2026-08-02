@@ -79,7 +79,7 @@ export function FileUploader({
         </svg>
         <p className="text-sm font-medium">גררו קבצים לכאן או לחצו לבחירה</p>
         <p className="text-xs text-black/50 dark:text-white/50">
-          txt, md, csv, json, pdf, docx — עד 10MB לקובץ
+          txt, md, csv, json, pdf, docx, xlsx, pptx — עד 10MB לקובץ
         </p>
         {uploading && (
           <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400">
@@ -91,7 +91,7 @@ export function FileUploader({
           ref={inputRef}
           type="file"
           multiple
-          accept=".txt,.md,.csv,.json,.pdf,.docx"
+          accept=".txt,.md,.csv,.json,.pdf,.docx,.xlsx,.pptx"
           className="hidden"
           disabled={disabled}
           onChange={(e) => void handleFiles(e.target.files)}

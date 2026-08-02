@@ -7,7 +7,7 @@
 
 1. העלו את הקובץ לתיקייה הזו (`public/seed/files/`) דרך ממשק ה-GitHub — כפתור
    "Add file" → "Upload files" בעמוד התיקייה, או `git add` + commit + push.
-   סוגי קבצים נתמכים: `.txt`, `.md`, `.csv`, `.json`, `.pdf`, `.docx`.
+   סוגי קבצים נתמכים: `.txt`, `.md`, `.csv`, `.json`, `.pdf`, `.docx`, `.xlsx`, `.pptx`.
 2. פתחו את קובץ ה-JSON של הפרסונה תחת `public/seed/personas/<id>.json` והוסיפו
    את שם הקובץ למערך `files`, לדוגמה:
 
