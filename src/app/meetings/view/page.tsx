@@ -21,6 +21,7 @@ import {
 import { Badge, Button, Card, ErrorBanner, Skeleton, inputClasses } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PersonaAvatar } from '@/components/PersonaAvatar';
+import { MeetingChat } from '@/components/MeetingChat';
 
 const PHASE_ORDER: MeetingPhase[] = ['prep', 'opening', 'discussion', 'convergence', 'extraction'];
 const PHASE_LABEL: Record<MeetingPhase, string> = {
@@ -395,6 +396,17 @@ function MeetingRunInner({ id }: { id: string }) {
   const wasLiveRef = useRef(false);
   const autoDownloadedRef = useRef(false);
 
+  const personaById = useMemo(() => {
+    const map = new Map<string, Persona>();
+    for (const p of personas ?? []) map.set(p.id, p);
+    return map;
+  }, [personas]);
+
+  const participants = useMemo(
+    () => (meeting?.participantIds ?? []).map((pid) => personaById.get(pid)).filter((p): p is Persona => p != null),
+    [meeting, personaById]
+  );
+
   function stopPolling() {
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -583,17 +595,22 @@ function MeetingRunInner({ id }: { id: string }) {
     autoDownloadedRef.current = true;
     meetingsApi
       .get(id)
-      .then(downloadMeetingDocx)
+      .then((m) => downloadMeetingDocx(m, participants))
       .catch((err) => {
         console.error('הורדת סיכום הפגישה (DOCX) נכשלה', err);
       });
-  }, [status, id]);
+  }, [status, id, participants]);
 
-  const personaById = useMemo(() => {
-    const map = new Map<string, Persona>();
-    for (const p of personas ?? []) map.set(p.id, p);
-    return map;
-  }, [personas]);
+  // After an additional discussion round finishes (MeetingChat), re-fetch the
+  // just-persisted meeting so usage/discussionRounds — which the round
+  // updates directly in storage — reflect it; the transcript itself is kept
+  // live via onRoundEntry below instead of waiting for this refetch.
+  function refreshAfterAdditionalRound() {
+    meetingsApi.get(id).then((m) => {
+      setUsage(m.usage);
+      setMeeting(m);
+    }).catch(() => {});
+  }
 
   async function handleCancel() {
     setCancelling(true);
@@ -658,22 +675,17 @@ function MeetingRunInner({ id }: { id: string }) {
               <Button
                 variant="secondary"
                 onClick={() => {
-                  downloadMeetingDocx(meeting).catch((err) => console.error('ייצוא DOCX נכשל', err));
+                  downloadMeetingDocx(meeting, participants).catch((err) => console.error('ייצוא DOCX נכשל', err));
                 }}
               >
                 ייצוא DOCX
               </Button>
-              <Button variant="secondary" onClick={() => downloadMeetingMarkdown(meeting)}>
+              <Button variant="secondary" onClick={() => downloadMeetingMarkdown(meeting, participants)}>
                 ייצוא Markdown
               </Button>
               <Button
                 variant="secondary"
-                onClick={() =>
-                  downloadMeetingJson(
-                    meeting,
-                    meeting.participantIds.map((id) => personaById.get(id)).filter((p): p is Persona => p != null)
-                  )
-                }
+                onClick={() => downloadMeetingJson(meeting, participants)}
               >
                 ייצוא JSON
               </Button>
@@ -768,6 +780,17 @@ function MeetingRunInner({ id }: { id: string }) {
       )}
 
       {status === 'completed' && result && <ResultTabs result={result} />}
+
+      {status === 'completed' && meeting && participants.length > 0 && (
+        <MeetingChat
+          key={meeting.id}
+          meetingId={meeting.id}
+          participants={participants}
+          initialChat={meeting.chat}
+          onRoundEntry={(entry) => setTranscript((prev) => [...prev, entry])}
+          onRoundComplete={refreshAfterAdditionalRound}
+        />
+      )}
 
       <ConfirmDialog
         open={cancelOpen}

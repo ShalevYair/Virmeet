@@ -7,6 +7,7 @@
 
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import {
+  ChatMessage,
   Meeting,
   MeetingTask,
   Persona,
@@ -53,6 +54,24 @@ function renderTranscript(transcript: TranscriptEntry[]): string {
     .join('\n\n---\n\n');
 }
 
+/** Who answered a chat turn — the persona's name for a 'persona'-mode turn, or 'מנחה' for a 'general' one. */
+function chatAnswererName(message: ChatMessage, personaById: Map<string, Persona>): string {
+  if (message.mode === 'persona') {
+    return (message.personaId && personaById.get(message.personaId)?.name) || 'משתתף';
+  }
+  return 'מנחה';
+}
+
+function renderChat(chat: ChatMessage[], personaById: Map<string, Persona>): string {
+  if (chat.length === 0) return '(אין)';
+  return chat
+    .map((c) => {
+      const answer = c.refused ? '(סורבה תשובה לשאלה הזו)' : c.answer;
+      return `**שאלה (${chatAnswererName(c, personaById)}):** ${c.question}\n\n${answer}`;
+    })
+    .join('\n\n---\n\n');
+}
+
 function renderTasksByOwner(tasks: MeetingTask[]): string {
   if (tasks.length === 0) return '(אין משימות)';
   const grouped = new Map<string, MeetingTask[]>();
@@ -77,7 +96,8 @@ function renderTasksByOwner(tasks: MeetingTask[]): string {
   return sections.join('\n\n');
 }
 
-export function renderMarkdown(meeting: Meeting): string {
+export function renderMarkdown(meeting: Meeting, participants: Persona[] = []): string {
+  const personaById = new Map(participants.map((p) => [p.id, p]));
   const parts: string[] = [];
   parts.push(`> **${DISCLAIMER_HE}**`);
   parts.push(`# ${meeting.title || 'פגישה ללא כותרת'}`);
@@ -131,6 +151,10 @@ export function renderMarkdown(meeting: Meeting): string {
     );
   }
 
+  if (meeting.chat.length > 0) {
+    parts.push(`## צ'אט אחרי הפגישה\n\n${renderChat(meeting.chat, personaById)}`);
+  }
+
   return parts.join('\n\n') + '\n';
 }
 
@@ -150,8 +174,8 @@ function downloadText(content: string, filename: string, mimeType: string): void
   downloadBlob(new Blob([content], { type: mimeType }), filename);
 }
 
-export function downloadMeetingMarkdown(meeting: Meeting): void {
-  downloadText(renderMarkdown(meeting), `virmeet-meeting-${meeting.id}.md`, 'text/markdown;charset=utf-8');
+export function downloadMeetingMarkdown(meeting: Meeting, participants: Persona[] = []): void {
+  downloadText(renderMarkdown(meeting, participants), `virmeet-meeting-${meeting.id}.md`, 'text/markdown;charset=utf-8');
 }
 
 /**
@@ -232,8 +256,19 @@ function renderTranscriptDocx(transcript: TranscriptEntry[]): Paragraph[] {
   return out;
 }
 
-/** Builds the DOCX document for a meeting. Section order mirrors renderMarkdown, except the transcript moves to the very end. */
-export function buildMeetingDocx(meeting: Meeting): Document {
+function renderChatDocx(chat: ChatMessage[], personaById: Map<string, Persona>): Paragraph[] {
+  if (chat.length === 0) return [emptyNotice('(אין)')];
+  const out: Paragraph[] = [];
+  for (const c of chat) {
+    out.push(paragraph(`שאלה (${chatAnswererName(c, personaById)}): ${c.question}`, { bold: true }));
+    out.push(paragraph(c.refused ? '(סורבה תשובה לשאלה הזו)' : c.answer));
+  }
+  return out;
+}
+
+/** Builds the DOCX document for a meeting. Section order mirrors renderMarkdown, except the transcript moves to the very end. `participants` resolves persona names for the post-meeting chat section — pass the meeting's own participant records (see downloadMeetingDocx). */
+export function buildMeetingDocx(meeting: Meeting, participants: Persona[] = []): Document {
+  const personaById = new Map(participants.map((p) => [p.id, p]));
   const children: Paragraph[] = [];
 
   children.push(paragraph(DISCLAIMER_HE, { italics: true, bold: true }));
@@ -303,6 +338,11 @@ export function buildMeetingDocx(meeting: Meeting): Document {
     }
   }
 
+  if (meeting.chat.length > 0) {
+    children.push(heading("צ'אט אחרי הפגישה", HeadingLevel.HEADING_2));
+    children.push(...renderChatDocx(meeting.chat, personaById));
+  }
+
   // Transcript last, as the reference appendix rather than the lead section.
   children.push(heading('תמליל הפגישה', HeadingLevel.HEADING_2));
   children.push(...renderTranscriptDocx(meeting.transcript));
@@ -312,11 +352,11 @@ export function buildMeetingDocx(meeting: Meeting): Document {
   });
 }
 
-export async function renderDocxBlob(meeting: Meeting): Promise<Blob> {
-  return Packer.toBlob(buildMeetingDocx(meeting));
+export async function renderDocxBlob(meeting: Meeting, participants: Persona[] = []): Promise<Blob> {
+  return Packer.toBlob(buildMeetingDocx(meeting, participants));
 }
 
-export async function downloadMeetingDocx(meeting: Meeting): Promise<void> {
-  const blob = await renderDocxBlob(meeting);
+export async function downloadMeetingDocx(meeting: Meeting, participants: Persona[] = []): Promise<void> {
+  const blob = await renderDocxBlob(meeting, participants);
   downloadBlob(blob, `virmeet-meeting-${meeting.id}.docx`);
 }

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FetchFn } from '../drive';
-import { INDEX_FILE_NAME, parseIndexContent, refreshPersonaDriveIndex, renderIndexContent } from './drive-knowledge';
+import {
+  EXTRACTED_TEXT_SUBFOLDER_NAME,
+  INDEX_FILE_NAME,
+  parseIndexContent,
+  refreshPersonaDriveIndex,
+  renderIndexContent,
+} from './drive-knowledge';
 import type { CallModelFn } from './types';
 import type { CallModelResult } from '../llm-types';
 
@@ -36,13 +42,20 @@ describe('refreshPersonaDriveIndex', () => {
     existingIndexId?: string;
     existingIndexContent?: string;
     fileContents?: Record<string, string>;
-  }): { fetchFn: FetchFn; writes: { url: string; body: string }[] } {
+    existingExtractedTextFolderId?: string;
+  }): { fetchFn: FetchFn; writes: { url: string; body: string }[]; creates: { url: string; body: string }[] } {
     const writes: { url: string; body: string }[] = [];
+    const creates: { url: string; body: string }[] = [];
     const fetchFn: FetchFn = vi.fn(async (url, init) => {
       const urlStr = String(url);
       const method = (init as RequestInit | undefined)?.method ?? 'GET';
+      const q = method === 'GET' ? (new URL(urlStr).searchParams.get('q') ?? '') : '';
 
-      if (urlStr.includes('/files?q=') && urlStr.includes('name%3D')) {
+      if (method === 'GET' && q.includes("mimeType='") && q.includes('name=')) {
+        // findFolder — the extracted-text subfolder lookup.
+        return driveJson({ files: opts.existingExtractedTextFolderId ? [{ id: opts.existingExtractedTextFolderId }] : [] });
+      }
+      if (method === 'GET' && q.includes('name=')) {
         // findFile — its query has a name= clause; listFolderFiles's doesn't.
         return driveJson({ files: opts.existingIndexId ? [{ id: opts.existingIndexId }] : [] });
       }
@@ -60,11 +73,12 @@ describe('refreshPersonaDriveIndex', () => {
         return new Response('{}');
       }
       if (method === 'POST') {
-        return driveJson({ id: 'new-index-id' });
+        creates.push({ url: urlStr, body: String((init as RequestInit).body) });
+        return driveJson({ id: 'new-created-id' });
       }
       throw new Error(`unexpected request: ${method} ${urlStr}`);
     }) as unknown as FetchFn;
-    return { fetchFn, writes };
+    return { fetchFn, writes, creates };
   }
 
   it('reuses the existing summary for a file whose modifiedTime is unchanged, without calling the model', async () => {
@@ -105,8 +119,60 @@ describe('refreshPersonaDriveIndex', () => {
       modifiedTime: '2026-02-01T00:00:00.000Z',
       summary: 'תקציר חדש שנוצר',
     });
-    expect(writes[0].body).toContain('new.txt');
-    expect(writes[0].body).toContain('תקציר חדש שנוצר');
+    const indexWrite = writes.find((w) => w.body.includes('תקציר חדש שנוצר'));
+    expect(indexWrite?.body).toContain('new.txt');
+  });
+
+  it('saves the full extracted text of a (re-)summarized file into a subfolder under the persona folder', async () => {
+    const { fetchFn, writes, creates } = makeFetchFn({
+      listedFiles: [{ id: 'file-1', name: 'new.txt', modifiedTime: '2026-02-01T00:00:00.000Z' }],
+      fileContents: { 'file-1': 'תוכן הקובץ החדש, במלואו' },
+    });
+    const callModel: CallModelFn = vi.fn(async () => summaryResult('תקציר קצר'));
+
+    await refreshPersonaDriveIndex('token', 'folder-id', callModel, undefined, undefined, fetchFn);
+
+    const folderCreate = creates.find((c) => c.body.includes(EXTRACTED_TEXT_SUBFOLDER_NAME));
+    expect(folderCreate?.body).toContain("application/vnd.google-apps.folder");
+
+    const flatTextWrite = writes.find((w) => w.body === 'תוכן הקובץ החדש, במלואו');
+    expect(flatTextWrite).toBeDefined();
+
+    // The summary written to the index is separate, shorter, AI-generated text — not the flat copy.
+    const indexWrite = writes.find((w) => w.body.includes('תקציר קצר'));
+    expect(indexWrite?.body).not.toContain('תוכן הקובץ החדש, במלואו');
+  });
+
+  it('reuses an existing extracted-text subfolder instead of creating a new one', async () => {
+    const { fetchFn, creates } = makeFetchFn({
+      listedFiles: [{ id: 'file-1', name: 'new.txt', modifiedTime: '2026-02-01T00:00:00.000Z' }],
+      fileContents: { 'file-1': 'תוכן' },
+      existingExtractedTextFolderId: 'existing-subfolder-id',
+    });
+    const callModel: CallModelFn = vi.fn(async () => summaryResult('תקציר'));
+
+    await refreshPersonaDriveIndex('token', 'folder-id', callModel, undefined, undefined, fetchFn);
+
+    expect(creates.some((c) => c.body.includes('application/vnd.google-apps.folder'))).toBe(false);
+  });
+
+  it('does not try to save a flat-text copy when extraction itself failed', async () => {
+    const { fetchFn, writes, creates } = makeFetchFn({
+      // No entry in fileContents for 'file-1' plus an unsupported extension —
+      // extractText degrades to an error rather than throwing (see extract.ts).
+      listedFiles: [{ id: 'file-1', name: 'broken.exe', modifiedTime: '2026-02-01T00:00:00.000Z' }],
+    });
+    const callModel: CallModelFn = vi.fn(async () => {
+      throw new Error('should not be called when extraction failed');
+    });
+
+    const result = await refreshPersonaDriveIndex('token', 'folder-id', callModel, undefined, undefined, fetchFn);
+
+    expect(result.files[0].summary).toContain('לא ניתן היה לחלץ טקסט');
+    // Only the index file itself gets created/written — no subfolder, no flat-text copy.
+    expect(creates.some((c) => c.body.includes(EXTRACTED_TEXT_SUBFOLDER_NAME))).toBe(false);
+    expect(creates).toHaveLength(1);
+    expect(writes).toHaveLength(1);
   });
 
   it('excludes its own index file from the knowledge listing', async () => {

@@ -75,6 +75,7 @@ export function makeMeeting(overrides: Partial<Meeting> = {}): Meeting {
     result: null,
     error: null,
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
+    chat: [],
     createdAt: now,
     updatedAt: now,
     completedAt: null,

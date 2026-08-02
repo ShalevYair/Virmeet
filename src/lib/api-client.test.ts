@@ -4,13 +4,20 @@ import { makeMeeting, makePersona } from './engine/__tests__/helpers';
 const getMeetingMock = vi.fn();
 const listPersonasMock = vi.fn();
 const updateMeetingMock = vi.fn();
+const listMeetingTypesMock = vi.fn();
+const getOrgSettingsMock = vi.fn();
 const getStoredApiKeyMock = vi.fn();
 const engineRunMeetingMock = vi.fn();
 
+// listMeetingTypes/getOrgSettings aren't exercised by the runMeeting tests
+// below, but engine/chat.ts (pulled in transitively via api-client.ts's
+// chatApi) reads them off this same mocked module at import time.
 vi.mock('./store', () => ({
   getMeeting: (...args: unknown[]) => getMeetingMock(...args),
   listPersonas: (...args: unknown[]) => listPersonasMock(...args),
   updateMeeting: (...args: unknown[]) => updateMeetingMock(...args),
+  listMeetingTypes: (...args: unknown[]) => listMeetingTypesMock(...args),
+  getOrgSettings: (...args: unknown[]) => getOrgSettingsMock(...args),
 }));
 vi.mock('./api-key', () => ({
   getStoredApiKey: (...args: unknown[]) => getStoredApiKeyMock(...args),
@@ -29,6 +36,8 @@ beforeEach(() => {
   getMeetingMock.mockReset();
   listPersonasMock.mockReset();
   updateMeetingMock.mockReset();
+  listMeetingTypesMock.mockReset();
+  getOrgSettingsMock.mockReset();
   getStoredApiKeyMock.mockReset();
   engineRunMeetingMock.mockReset();
 });

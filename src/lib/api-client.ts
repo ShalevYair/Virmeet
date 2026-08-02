@@ -4,11 +4,12 @@
 // changed — they still call e.g. `personasApi.get(id)` and catch `ApiError`
 // exactly like they did against the old fetch()-based client.
 
-import type { AttachedFile, AvailableModel, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
+import type { AttachedFile, AvailableModel, ChatMessage, MeetingPhase, MeetingResult, OrgSettings, TranscriptEntry } from './types';
 import { isKnownModel } from './types';
 import * as store from './store';
 import type { MeetingSummary } from './store';
 import { runMeeting as engineRunMeeting } from './engine/runner';
+import { askGeneralChatQuestion, askPersonaChatQuestion, runAdditionalDiscussionRound } from './engine/chat';
 import { getStoredApiKey } from './api-key';
 import { ensureSeedLoaded } from './seed-loader';
 
@@ -413,3 +414,44 @@ export async function runMeeting(id: string, handlers: RunMeetingHandlers): Prom
     handlers.signal
   );
 }
+
+// ---------------------------------------------------------------------------
+// Post-meeting chat — general/persona Q&A and additional discussion rounds,
+// available once a meeting has completed (engine/chat.ts). Same in-process,
+// no-SSE model as runMeeting() above.
+// ---------------------------------------------------------------------------
+
+function requireGeminiKey(): string {
+  const geminiKey = getStoredApiKey();
+  if (!geminiKey) {
+    badRequest(
+      'לא נמצא מפתח API של Gemini בדפדפן הזה. יש להזין מפתח אישי במסך ההגדרות (Settings) לפני המשך השיחה.'
+    );
+  }
+  return geminiKey;
+}
+
+export interface RunAdditionalRoundHandlers {
+  onEntry?: (entry: TranscriptEntry) => void;
+  signal?: AbortSignal;
+}
+
+export const chatApi = {
+  askGeneral: (meetingId: string, question: string, signal?: AbortSignal) =>
+    run(async () => {
+      const geminiKey = requireGeminiKey();
+      return askGeneralChatQuestion(meetingId, question, {}, geminiKey, signal);
+    }),
+  askPersona: (meetingId: string, personaId: string, question: string, signal?: AbortSignal) =>
+    run(async () => {
+      const geminiKey = requireGeminiKey();
+      return askPersonaChatQuestion(meetingId, personaId, question, {}, geminiKey, signal);
+    }),
+  runAdditionalRound: (meetingId: string, topic: string, handlers: RunAdditionalRoundHandlers = {}) =>
+    run(async () => {
+      const geminiKey = requireGeminiKey();
+      return runAdditionalDiscussionRound(meetingId, topic, {}, geminiKey, handlers.signal, handlers.onEntry);
+    }),
+};
+
+export type { ChatMessage };
