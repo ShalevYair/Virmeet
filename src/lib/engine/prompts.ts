@@ -12,7 +12,7 @@
 // preserve. Do not fold per-phase or per-round content into the system
 // blocks.
 
-import { AttachedFile, Meeting, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
+import { AttachedFile, ChatMessage, Meeting, MeetingResult, MeetingType, OrgSettings, Persona, TranscriptEntry } from '../types';
 import { SystemBlock } from '../llm-types';
 import type { PersonaKnowledgeFile } from './drive-knowledge';
 import { OpeningOutput, PrepOutput } from './types';
@@ -130,7 +130,7 @@ function meetingTypesBlock(meetingTypes: MeetingType[]): string {
     .join('\n\n');
 }
 
-function meetingHeaderBlock(meeting: Meeting, meetingTypes: MeetingType[]): string {
+export function meetingHeaderBlock(meeting: Meeting, meetingTypes: MeetingType[]): string {
   return `# הפגישה
 
 כותרת: ${meeting.title || '(כותרת תיקבע בסיום הפגישה)'}
@@ -142,7 +142,7 @@ ${meetingTypesBlock(meetingTypes)}
 ${meeting.objective}`;
 }
 
-function formatTranscript(transcript: TranscriptEntry[]): string {
+export function formatTranscript(transcript: TranscriptEntry[]): string {
   if (transcript.length === 0) return '(עדיין לא נאמר דבר)';
   return transcript
     .map((e) => {
@@ -313,6 +313,118 @@ openQuestions, conflicts, risks, tasks, modelAssumptions.
 - כל דבר שאתה, המנחה, השלמת בעצמך ולא נאמר במפורש בדיון (הנחת עבודה, פרשנות,
   השלמת פרט חסר) — ציין אותו במפורש ברשימת modelAssumptions. אל תשלב השלמות
   כאלה בשקט בתוך summary/decisions/tasks בלי לסמן אותן גם שם.`;
+}
+
+// ---------------------------------------------------------------------------
+// Post-meeting chat — free-form Q&A (general or directed at one persona) and
+// additional discussion rounds, both available once a meeting has completed
+// (engine/chat.ts). Unlike the phased prompts above, these aren't part of
+// the deterministic state machine, so they don't need to share the
+// [orgBlock, sharedFilesBlock] caching prefix discipline as tightly — they
+// still reuse buildFacilitatorSystemBlocks/buildPersonaSystemBlocks as-is.
+// ---------------------------------------------------------------------------
+
+const CHAT_HISTORY_LIMIT = 10;
+
+/** Renders this chat thread's own prior turns (already filtered to one mode/persona by the caller), capped to the most recent `CHAT_HISTORY_LIMIT`. */
+function formatChatHistory(priorChat: ChatMessage[]): string {
+  if (priorChat.length === 0) return '';
+  const recent = priorChat.slice(-CHAT_HISTORY_LIMIT);
+  const lines = recent
+    .map((c) => `שאלה: ${c.question}\nתשובה: ${c.refused ? '(סורבה תשובה לשאלה הזו)' : c.answer}`)
+    .join('\n\n');
+  return `\n\n# שיחת ההמשך עד כה (באותו נושא)\n${lines}`;
+}
+
+function formatMeetingResultBlock(result: MeetingResult | null): string {
+  if (!result) return '(לא הופק סיכום מובנה לפגישה זו)';
+  return `${result.summary}\n\nהחלטות:\n${
+    result.decisions.length ? result.decisions.map((d) => `- ${d}`).join('\n') : '(אין החלטות מתועדות)'
+  }`;
+}
+
+/** A single question the user asks about the meeting as a whole, answered by the facilitator (not any one persona). */
+export function buildGeneralChatUserMessage(
+  meeting: Meeting,
+  meetingTypes: MeetingType[],
+  transcript: TranscriptEntry[],
+  result: MeetingResult | null,
+  priorChat: ChatMessage[],
+  question: string
+): string {
+  return `${meetingHeaderBlock(meeting, meetingTypes)}
+
+# תמליל הפגישה המלא
+${formatTranscript(transcript)}
+
+# סיכום התוצאות של הפגישה
+${formatMeetingResultBlock(result)}${formatChatHistory(priorChat)}
+
+# המשימה שלך עכשיו
+
+הפגישה הזו כבר הסתיימה. משתמש שואל עכשיו שאלת המשך כללית עליה — לא מנקודת
+המבט של משתתף מסוים, אלא כמנחה שמכיר את כל התמליל והתוצאות. ענה ישירות על סמך
+מה שבאמת נאמר ונקבע בפגישה; אם משהו לא נדון או לא הוכרע בפועל — אמור זאת
+במפורש ואל תמציא תשובה. תשובה בטקסט חופשי, עד כ-200 מילה.
+
+# השאלה
+${question}`;
+}
+
+/** A single question the user directs at one specific persona, after the meeting — answered in character, from that persona's own point of view. */
+export function buildPersonaChatUserMessage(
+  meeting: Meeting,
+  meetingTypes: MeetingType[],
+  persona: Persona,
+  transcript: TranscriptEntry[],
+  result: MeetingResult | null,
+  priorChat: ChatMessage[],
+  question: string
+): string {
+  return `${meetingHeaderBlock(meeting, meetingTypes)}
+
+# תמליל הפגישה המלא (כולל מה שאמרת בה בעצמך)
+${formatTranscript(transcript)}
+
+# סיכום התוצאות של הפגישה
+${formatMeetingResultBlock(result)}${formatChatHistory(priorChat)}
+
+# המשימה שלך עכשיו
+
+הפגישה כבר הסתיימה. משתמש פונה אליך ישירות, אחרי הפגישה, עם שאלת המשך — כ
+${persona.role}. ענה מנקודת המבט שלך בלבד, בהתבסס על מה שנאמר בפגישה ועל הידע
+והפרומפט שלך. אם השאלה נוגעת למשהו שלא היה חלק מהפגישה או שאין לך מידע עליו —
+אמור זאת במפורש, כמו בכל שלב אחר בסימולציה. תשובה בטקסט חופשי, עד כ-200 מילה.
+
+# השאלה
+${question}`;
+}
+
+/** One persona's turn in an additional discussion round opened after the meeting ended — same voice/rules as buildDiscussionUserMessage, but framed around a user-supplied topic instead of the facilitator's original opening. */
+export function buildAdditionalRoundUserMessage(
+  meeting: Meeting,
+  meetingTypes: MeetingType[],
+  persona: Persona,
+  round: number,
+  transcriptSoFar: TranscriptEntry[],
+  topic: string
+): string {
+  return `${meetingHeaderBlock(meeting, meetingTypes)}
+
+# מה נאמר עד כה (כולל סבבי הדיון המקוריים ותוצאות הפגישה)
+${formatTranscript(transcriptSoFar)}
+
+# המשימה שלך עכשיו
+
+הפגישה המקורית הסתיימה, אבל נפתח סבב דיון נוסף (סבב ${round}) כדי להמשיך לדון
+בנושא הבא שהעלה מי שיזם את הפגישה:
+
+"${topic}"
+
+הגב כ${persona.role}, **ישירות** לנושא הזה ולמה שכבר נאמר בפגישה המקורית (ציין
+מי אמר מה כשרלוונטי). אם עולה שאלה שאין לך מידע עליה — אמור זאת במפורש ("אין
+לי את המידע הזה, צריך לבדוק מול X"). אורך התשובה: 80-200 מילה, טקסט חופשי (לא
+JSON, בלי כותרות).`;
 }
 
 // ---------------------------------------------------------------------------

@@ -94,6 +94,29 @@ export interface MeetingResult {
   modelAssumptions: string[]; // מה שהמודל השלים בעצמו — מסומן במפורש
 }
 
+// Post-meeting chat (spec: post-session chat management) — available once a
+// meeting reaches status 'completed', from either the just-finished run's
+// own page or by reopening that meeting later; both are the same route
+// (meetings/view), so no separate "past meeting" concept is needed.
+//
+// 'general'/'persona' modes are Q&A: each turn is one question + one answer,
+// stored as a single record (not split user/assistant messages) since there
+// is no free-form back-and-forth beyond one question at a time. 'round' mode
+// is different in kind — it runs a real additional discussion round and
+// appends ordinary TranscriptEntry rows to Meeting.transcript instead, so it
+// is never represented here.
+export type ChatMode = 'general' | 'persona';
+
+export interface ChatMessage {
+  id: string;
+  mode: ChatMode;
+  personaId?: string; // set when mode === 'persona' — who was asked
+  question: string;
+  answer: string; // '' when refused
+  refused?: boolean;
+  createdAt: string; // ISO
+}
+
 export interface Meeting {
   id: string;
   title: string; // ריק עד שהפגישה מסתיימת — המנחה קובע כותרת בשלב extraction
@@ -103,12 +126,13 @@ export interface Meeting {
   creatorParticipates: boolean; // האם יוצר הפגישה (המשתמש) משתתף בעצמו בכל סבב דיון
   model: AvailableModel; // המודל שישמש את כל המשתתפים והמנחה בפגישה זו
   files: AttachedFile[]; // קבצי רקע משותפים
-  discussionRounds: number; // 1-4, ברירת מחדל 2
+  discussionRounds: number; // 1-4, ברירת מחדל 2 — לאחר סיום, יכול לגדול דרך "סבב דיון נוסף" בצ'אט שלאחר הפגישה
   status: MeetingStatus;
   transcript: TranscriptEntry[];
   result: MeetingResult | null;
   error: string | null;
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; apiCalls: number };
+  chat: ChatMessage[]; // צ'אט חופשי לאחר סיום הפגישה (שאלות כלליות / לפרסונה ספציפית) — ראו ChatMessage
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

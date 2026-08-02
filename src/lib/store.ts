@@ -294,15 +294,21 @@ export function listMeetings(summaryOnly: true): Promise<MeetingSummary[]>;
 export function listMeetings(summaryOnly?: false): Promise<Meeting[]>;
 export async function listMeetings(summaryOnly = false): Promise<Meeting[] | MeetingSummary[]> {
   const db = await getDb();
-  const meetings: Meeting[] = await db.getAll('meetings');
+  const meetings: Meeting[] = (await db.getAll('meetings')).map(normalizeMeeting);
   meetings.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   if (!summaryOnly) return meetings;
   return meetings.map(({ transcript: _transcript, result: _result, files: _files, ...rest }) => rest);
 }
 
+/** A meeting persisted before `chat` existed has no such field in IndexedDB — default it so callers never see `undefined`. */
+function normalizeMeeting(meeting: Meeting): Meeting {
+  return { ...meeting, chat: meeting.chat ?? [] };
+}
+
 export async function getMeeting(id: string): Promise<Meeting | null> {
   const db = await getDb();
-  return (await db.get('meetings', id)) ?? null;
+  const meeting: Meeting | undefined = await db.get('meetings', id);
+  return meeting ? normalizeMeeting(meeting) : null;
 }
 
 export async function createMeeting(input: MeetingCreateInput): Promise<Meeting> {
@@ -323,6 +329,7 @@ export async function createMeeting(input: MeetingCreateInput): Promise<Meeting>
     result: null,
     error: null,
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, apiCalls: 0 },
+    chat: [],
     createdAt: now,
     updatedAt: now,
     completedAt: null,
@@ -340,7 +347,7 @@ export async function updateMeeting(id: string, patch: Partial<Meeting>): Promis
   const current: Meeting | undefined = await db.get('meetings', id);
   if (!current) return null;
   const updated: Meeting = {
-    ...current,
+    ...normalizeMeeting(current),
     ...patch,
     id: current.id,
     createdAt: current.createdAt,

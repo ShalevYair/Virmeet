@@ -15,13 +15,23 @@
 // file ids this module already resolved during the refresh above — no extra
 // Drive search needed.
 
-import { downloadFileMedia, downloadFileText, findFile, listFolderFiles, upsertTextFile, type FetchFn } from '../drive';
+import { downloadFileMedia, downloadFileText, ensureFolder, findFile, listFolderFiles, upsertTextFile, type FetchFn } from '../drive';
 import { AttachedFile } from '../types';
 import { extensionOf, extractText } from '../extract';
 import type { CallModelFn } from './types';
 
 export const DRIVE_INDEX_MODEL = 'gemini-3.5-flash-lite';
 export const INDEX_FILE_NAME = '_virmeet-index.md';
+
+// A file's full extracted text is only ever computed in memory to build its
+// one-line summary above — without this, it's thrown away right after, so
+// there's no way to see what the model actually read from a given file.
+// Filed in a subfolder (not the knowledge folder itself) so it's never
+// picked up by listFolderFiles on the next refresh — a flat-text copy sitting
+// next to the original would otherwise get "discovered" as a new knowledge
+// file and re-summarized, duplicating that file's content in every persona's
+// prompt.
+export const EXTRACTED_TEXT_SUBFOLDER_NAME = 'טקסט מחולץ';
 
 // A folder with more new/changed files than this in one run only gets the
 // first N summarized — same "budget everything" discipline as
@@ -136,6 +146,18 @@ export async function refreshPersonaDriveIndex(
   let truncated = false;
   const files: PersonaKnowledgeFile[] = [];
 
+  // Created lazily — only once there's actually a flat-text file to write —
+  // so a refresh with no new/changed files costs nothing beyond the index
+  // read/write it already did.
+  let extractedTextFolderId: string | null = null;
+  async function ensureExtractedTextFolder(): Promise<string> {
+    if (!extractedTextFolderId) {
+      const folder = await ensureFolder(token, EXTRACTED_TEXT_SUBFOLDER_NAME, folderId, fetchFn);
+      extractedTextFolderId = folder.id;
+    }
+    return extractedTextFolderId;
+  }
+
   for (const file of knowledgeFiles) {
     const previous = previousEntries.get(file.name);
     if (previous && previous.modifiedTime === file.modifiedTime) {
@@ -155,10 +177,28 @@ export async function refreshPersonaDriveIndex(
     try {
       const buffer = await downloadFileMedia(token, file.id, fetchFn);
       const extraction = await extractText(buffer, extensionOf(file.name));
-      const summary = extraction.error
-        ? `(לא ניתן היה לחלץ טקסט מהקובץ: ${extraction.error})`
-        : await summarizeFile(callModel, file.name, extraction.text, apiKey, signal);
+      if (extraction.error) {
+        files.push({
+          name: file.name,
+          modifiedTime: file.modifiedTime,
+          summary: `(לא ניתן היה לחלץ טקסט מהקובץ: ${extraction.error})`,
+        });
+        continue;
+      }
+
+      const summary = await summarizeFile(callModel, file.name, extraction.text, apiKey, signal);
       files.push({ name: file.name, modifiedTime: file.modifiedTime, summary });
+
+      // Best-effort: a failure to save the flat-text copy shouldn't fail the
+      // whole refresh — the summary above is what actually matters for the
+      // meeting, this is just a durable, human-readable record of what was
+      // read.
+      try {
+        const textFolderId = await ensureExtractedTextFolder();
+        await upsertTextFile(token, `${file.name}.txt`, textFolderId, extraction.text, 'text/plain', fetchFn);
+      } catch {
+        // Ignored — see comment above.
+      }
     } catch (err) {
       files.push({
         name: file.name,
